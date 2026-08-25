@@ -179,24 +179,50 @@ async function parseXlsxBuffer(buffer) {
 
   const names = [];
   wb.worksheets.forEach((ws) => {
-    let headerRow = null;
-    ws.eachRow((row, rowNumber) => {
+    // Collect every non-empty row first, so we can find the REAL header row
+    // rather than assuming it's the first non-empty row. Government sheets
+    // like RBI's routinely start with a title row ("List of NBFCs as on ...")
+    // that has only one populated cell - treating that as the header makes
+    // every later column lookup wrong (e.g. picks the Sl.No. column as "Name").
+    const allRows = [];
+    ws.eachRow((row) => {
       const values = row.values.slice(1).map((v) => (v == null ? "" : String(v).trim()));
-      if (!values.some(Boolean)) return;
+      if (values.some(Boolean)) allRows.push(values);
+    });
 
-      if (!headerRow) {
-        // First non-empty row on each sheet is treated as the header.
-        headerRow = values;
-        return;
-      }
-      const nameIdx = guessNameColumnIndex(headerRow);
-      const name = (values[nameIdx] || "").trim();
+    const headerIdx = findHeaderRowIndex(allRows);
+    if (headerIdx === -1) return; // no recognisable header on this sheet
+
+    const headerRow = allRows[headerIdx];
+    const nameIdx = guessNameColumnIndex(headerRow);
+
+    for (let i = headerIdx + 1; i < allRows.length; i++) {
+      const name = (allRows[i][nameIdx] || "").trim();
       if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name)) {
         names.push(name);
       }
-    });
+    }
   });
   return dedupe(names);
+}
+
+/**
+ * Finds the header row among candidate rows: the first row that (a) has at
+ * least 2 non-empty cells (title rows usually have just 1) and (b) contains
+ * a cell matching a name/company/entity-ish label. Falls back to the first
+ * row with >=2 non-empty cells if no label matches (some sheets use unusual
+ * header wording), and to -1 (skip sheet) if nothing qualifies at all.
+ */
+function findHeaderRowIndex(rows) {
+  const labelPattern = /name|company|entity|institution|sl\.?\s*no/i;
+  let fallback = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const nonEmptyCount = rows[i].filter(Boolean).length;
+    if (nonEmptyCount < 2) continue; // likely a title/merged-cell row
+    if (fallback === -1) fallback = i;
+    if (rows[i].some((cell) => labelPattern.test(cell))) return i;
+  }
+  return fallback;
 }
 
 async function scrapePdfLink(source) {

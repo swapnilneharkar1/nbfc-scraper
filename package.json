@@ -1,0 +1,20 @@
+{
+  "name": "nbfc-fii-scraper",
+  "version": "1.0.0",
+  "description": "Scrapes NBFC/HFC/Insurance/Other-FII registered entity lists from regulator portals (RBI, NHB, IRDAI, SEBI, PFRDA) and consolidates them into a single Excel workbook, per Annex-1/Annex-2 of the BRD.",
+  "type": "module",
+  "main": "src/scraper.js",
+  "scripts": {
+    "scrape": "node src/scraper.js"
+  },
+  "dependencies": {
+    "puppeteer": "^22.15.0",
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "exceljs": "^4.4.0",
+    "pdf-parse": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

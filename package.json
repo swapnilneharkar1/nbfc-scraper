@@ -8,11 +8,11 @@
     "scrape": "node src/scraper.js"
   },
   "dependencies": {
-    "puppeteer": "^22.15.0",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
     "exceljs": "^4.4.0",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "puppeteer": "^22.15.0"
   },
   "engines": {
     "node": ">=18"

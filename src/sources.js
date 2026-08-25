@@ -44,7 +44,15 @@ export const sources = [
     url: "https://www.rbi.org.in/Scripts/PublicationsView.aspx?id=12043",
     type: "aspx_dynamic",
     tableSelector: "table",
-    notes: "Page lists Operating / Revoked / Ceased / Surrendered / Cancelled PSS entities, usually in separate tables or sections - classification sub-type comes from the section heading nearest the row.",
+    notes:
+      "CONFIRMED NOT SCRAPABLE AS A TABLE: this RBI page is formatted as long " +
+      "prose/numbered-list paragraphs, not real <table> markup. Generic table " +
+      "scraping correctly returns nothing here (a length filter blocks the " +
+      "garbage it would otherwise produce). Getting real data out requires a " +
+      "purpose-built regex/NLP extractor tuned to this page's exact wording, " +
+      "which will break the moment RBI rephrases anything. Recommend manual " +
+      "entry for this one, or ask for a bespoke parser if the wording is stable " +
+      "enough to be worth it.",
   },
   {
     key: "nhb_hfc",
@@ -65,7 +73,13 @@ export const sources = [
     url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
     type: "aspx_dynamic",
     tableSelector: "table",
-    notes: "Single page covers all bank sub-categories - classification is derived from the tab/section the row sits under.",
+    notes:
+      "Same issue as rbi_pss: this page is prose/heading-based, not real <table> " +
+      "markup, so it correctly returns 0 rows rather than garbage. There IS a " +
+      "cleaner numbered 'Sr.No. Name of the Bank' summary list further down the " +
+      "same page for several categories (SBI, private banks, foreign banks, " +
+      "RRBs) that could be regex-extracted specifically - worth a bespoke parser " +
+      "if this category matters for your reporting.",
   },
   {
     key: "irdai_life",

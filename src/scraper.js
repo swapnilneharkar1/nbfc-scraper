@@ -59,6 +59,19 @@ function extractTables(html, selector = "table") {
   return tables;
 }
 
+/** Same header-row heuristic used for xlsx sheets - see findHeaderRowIndex(). */
+function findHeaderRowIndex(rows) {
+  const labelPattern = /name|company|entity|institution|sl\.?\s*no/i;
+  let fallback = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const nonEmptyCount = rows[i].filter(Boolean).length;
+    if (nonEmptyCount < 2) continue; // likely a title/merged-cell row
+    if (fallback === -1) fallback = i;
+    if (rows[i].some((cell) => labelPattern.test(cell))) return i;
+  }
+  return fallback;
+}
+
 /** Guess which column in a scraped table is the entity/company name. */
 function guessNameColumnIndex(headerRow) {
   const patterns = [/name/i, /company/i, /entity/i, /institution/i];
@@ -69,12 +82,22 @@ function guessNameColumnIndex(headerRow) {
   return 0; // fall back to first column
 }
 
+// A real entity name is a handful of words, not a page of prose. Pages
+// like RBI's PSS/Banks listings aren't built from real <table> markup, so
+// naive table scraping on them yields one giant blob per "row" - this cap
+// throws those out instead of polluting the output with garbage.
+const MAX_PLAUSIBLE_NAME_LENGTH = 180;
+
 function rowsToNames(table) {
-  const [header, ...body] = table;
+  const headerIdx = findHeaderRowIndex(table);
+  if (headerIdx === -1) return [];
+  const header = table[headerIdx];
   const nameIdx = guessNameColumnIndex(header);
-  return body
+  return table
+    .slice(headerIdx + 1)
     .map((r) => (r[nameIdx] || "").trim())
-    .filter((name) => name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name));
+    .filter((name) => name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name))
+    .filter((name) => name.length <= MAX_PLAUSIBLE_NAME_LENGTH);
 }
 
 async function scrapeHtmlTable(source) {
@@ -198,31 +221,16 @@ async function parseXlsxBuffer(buffer) {
 
     for (let i = headerIdx + 1; i < allRows.length; i++) {
       const name = (allRows[i][nameIdx] || "").trim();
-      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name)) {
+      if (
+        name &&
+        !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) &&
+        name.length <= MAX_PLAUSIBLE_NAME_LENGTH
+      ) {
         names.push(name);
       }
     }
   });
   return dedupe(names);
-}
-
-/**
- * Finds the header row among candidate rows: the first row that (a) has at
- * least 2 non-empty cells (title rows usually have just 1) and (b) contains
- * a cell matching a name/company/entity-ish label. Falls back to the first
- * row with >=2 non-empty cells if no label matches (some sheets use unusual
- * header wording), and to -1 (skip sheet) if nothing qualifies at all.
- */
-function findHeaderRowIndex(rows) {
-  const labelPattern = /name|company|entity|institution|sl\.?\s*no/i;
-  let fallback = -1;
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const nonEmptyCount = rows[i].filter(Boolean).length;
-    if (nonEmptyCount < 2) continue; // likely a title/merged-cell row
-    if (fallback === -1) fallback = i;
-    if (rows[i].some((cell) => labelPattern.test(cell))) return i;
-  }
-  return fallback;
 }
 
 async function scrapePdfLink(source) {

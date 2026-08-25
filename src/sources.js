@@ -25,12 +25,16 @@ export const sources = [
     classification: "Non-Banking Financial Company (NBFC)",
     regulator: "RBI",
     url: "https://www.rbi.org.in/Scripts/BS_NBFCList.aspx",
-    type: "aspx_dynamic",
+    fileUrl:
+      "https://rbidocs.rbi.org.in/rdocs/content/DOCs/List_of_NBFCs_and_ARCs_registered_with_the_RBI.XLSX",
+    type: "xlsx_direct",
     notes:
-      "RBI publishes this as a PDF/XLS link on the page rather than a live HTML " +
-      "table. The scraper looks for a link whose text/href matches /nbfc.*list/i " +
-      "and downloads it as a file instead of reading a DOM table. Update quarterly " +
-      "per RBI's own refresh cycle.",
+      "IMPORTANT: rbidocs.rbi.org.in serves a CAPTCHA/bot-check page instead " +
+      "of the file when hit by a script or headless browser without a prior " +
+      "human-solved challenge. This means automated download WILL currently " +
+      "fail in CI. Workaround: download the file manually each cycle and drop " +
+      "it into /manual-downloads/rbi_nbfc.xlsx - the scraper will use that " +
+      "local copy if present instead of re-fetching from RBI.",
   },
   {
     key: "rbi_pss",
@@ -107,9 +111,13 @@ export const sources = [
     classification: "NBFC / ARC - Cancelled CoR",
     regulator: "RBI",
     url: "https://www.rbi.org.in/Scripts/BS_NBFCList.aspx",
-    type: "pdf_link",
-    linkPattern: /cancel.*\.pdf$/i,
-    notes: "Matches Annex-3 'Cancelled NBFC & ARC' sheet in the BRD workbook.",
+    fileUrl:
+      "https://rbidocs.rbi.org.in/rdocs/content/DOCs/List_of_NBFCs_and_ARCs_whose_CoR_has_been_cancelled_by_the_RBI.XLSX",
+    type: "xlsx_direct",
+    notes:
+      "Same CAPTCHA caveat as rbi_nbfc above - same manual-download fallback applies " +
+      "(/manual-downloads/rbi_nbfc_cancelled.xlsx). Matches Annex-3 'Cancelled NBFC & ARC' " +
+      "sheet in the BRD workbook.",
   },
 ];
 

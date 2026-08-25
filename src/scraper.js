@@ -19,15 +19,18 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import puppeteer from "puppeteer";
 import pdfParse from "pdf-parse";
+import ExcelJS from "exceljs";
 import { sources } from "./sources.js";
 import { writeWorkbook } from "./excelWriter.js";
 
 const OUTPUT_DIR = path.resolve("output");
 const DOWNLOAD_DIR = path.resolve("output", "downloads");
 const RUN_LOG_PATH = path.resolve("output", "run-log.json");
+const MANUAL_DIR = path.resolve("manual-downloads");
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+fs.mkdirSync(MANUAL_DIR, { recursive: true });
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -123,6 +126,77 @@ async function scrapeAspxDynamic(source, browser) {
   } finally {
     await page.close();
   }
+}
+
+/**
+ * Handles sources with a known, direct .xlsx download URL (e.g. RBI's NBFC
+ * lists). Checks for a manually-supplied local copy first (see MANUAL_DIR),
+ * since RBI's download host currently CAPTCHA-gates automated requests and
+ * that cannot be solved by a script. If no local copy exists, attempts the
+ * live download and clearly flags a captcha_block if that's what comes back.
+ */
+async function scrapeXlsxDirect(source) {
+  const manualPath = path.join(MANUAL_DIR, `${source.key}.xlsx`);
+  if (fs.existsSync(manualPath)) {
+    console.log(`  using manually-supplied file: ${manualPath}`);
+    return await parseXlsxBuffer(fs.readFileSync(manualPath));
+  }
+
+  const res = await axios.get(source.fileUrl, {
+    responseType: "arraybuffer",
+    headers: { "User-Agent": USER_AGENT },
+    timeout: 60000,
+    validateStatus: () => true,
+  });
+
+  const contentType = res.headers["content-type"] || "";
+  const looksLikeHtml =
+    contentType.includes("text/html") ||
+    Buffer.from(res.data.slice(0, 200)).toString("utf8").includes("<html");
+
+  if (looksLikeHtml) {
+    // Save the response for debugging and raise a clear, specific error
+    // rather than trying (and failing) to parse HTML as a spreadsheet.
+    const debugPath = path.join(DOWNLOAD_DIR, `${source.key}.blocked.html`);
+    fs.writeFileSync(debugPath, res.data);
+    throw new Error(
+      `CAPTCHA_OR_BLOCK: RBI returned an HTML challenge page instead of the ` +
+        `.xlsx file (saved to ${debugPath}). This host blocks automated ` +
+        `downloads. Fix: download the file manually in a browser and save it ` +
+        `to manual-downloads/${source.key}.xlsx in the repo, then re-run.`
+    );
+  }
+
+  const rawPath = path.join(DOWNLOAD_DIR, `${source.key}.xlsx`);
+  fs.writeFileSync(rawPath, res.data);
+  return await parseXlsxBuffer(res.data);
+}
+
+/** Reads a real .xlsx buffer and returns the entity names found in it. */
+async function parseXlsxBuffer(buffer) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+
+  const names = [];
+  wb.worksheets.forEach((ws) => {
+    let headerRow = null;
+    ws.eachRow((row, rowNumber) => {
+      const values = row.values.slice(1).map((v) => (v == null ? "" : String(v).trim()));
+      if (!values.some(Boolean)) return;
+
+      if (!headerRow) {
+        // First non-empty row on each sheet is treated as the header.
+        headerRow = values;
+        return;
+      }
+      const nameIdx = guessNameColumnIndex(headerRow);
+      const name = (values[nameIdx] || "").trim();
+      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name)) {
+        names.push(name);
+      }
+    });
+  });
+  return dedupe(names);
 }
 
 async function scrapePdfLink(source) {
@@ -226,6 +300,8 @@ async function run() {
           names = await scrapeHtmlTable(source);
         } else if (source.type === "aspx_dynamic") {
           names = await scrapeAspxDynamic(source, browser);
+        } else if (source.type === "xlsx_direct") {
+          names = await scrapeXlsxDirect(source);
         } else if (source.type === "pdf_link") {
           names = await scrapePdfLink(source);
         } else if (source.type === "manual") {

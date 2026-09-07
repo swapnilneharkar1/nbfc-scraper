@@ -22,6 +22,10 @@ import pdfParse from "pdf-parse";
 import ExcelJS from "exceljs";
 import { sources } from "./sources.js";
 import { writeWorkbook } from "./excelWriter.js";
+import { fetchNbfcStatusDeltas } from "./pressReleases.js";
+import { mergeStatuses, extractMasterListDate } from "./statusMerge.js";
+import { parseRbiBanksSection, parseRbiPssSection } from "./customParsers.js";
+import { getRank } from "./priorityMatrix.js";
 
 const OUTPUT_DIR = path.resolve("output");
 const DOWNLOAD_DIR = path.resolve("output", "downloads");
@@ -107,7 +111,7 @@ async function scrapeHtmlTable(source) {
   });
   const tables = extractTables(html, source.tableSelector || "table");
   const names = tables.flatMap(rowsToNames);
-  return dedupe(names);
+  return { names: dedupe(names), titleText: null };
 }
 
 /**
@@ -131,7 +135,7 @@ async function scrapeAspxDynamic(source, browser) {
     const tables = extractTables(html, source.tableSelector || "table");
     const names = dedupe(tables.flatMap(rowsToNames));
 
-    if (names.length > 0) return names;
+    if (names.length > 0) return { names, titleText: null };
 
     // No usable table rendered - look for a downloadable list instead.
     const linkPattern = source.linkPattern || /(list|nbfc|hfc).*\.(pdf|xlsx?|csv)$/i;
@@ -145,7 +149,7 @@ async function scrapeAspxDynamic(source, browser) {
       return await downloadAndExtract(match.href, source);
     }
 
-    return [];
+    return { names: [], titleText: null };
   } finally {
     await page.close();
   }
@@ -160,9 +164,10 @@ async function scrapeAspxDynamic(source, browser) {
  */
 async function scrapeXlsxDirect(source) {
   const manualPath = path.join(MANUAL_DIR, `${source.key}.xlsx`);
+  const opts = { captureClassification: !!source.captureClassificationColumn };
   if (fs.existsSync(manualPath)) {
     console.log(`  using manually-supplied file: ${manualPath}`);
-    return await parseXlsxBuffer(fs.readFileSync(manualPath));
+    return await parseXlsxBuffer(fs.readFileSync(manualPath), opts);
   }
 
   const res = await axios.get(source.fileUrl, {
@@ -192,21 +197,23 @@ async function scrapeXlsxDirect(source) {
 
   const rawPath = path.join(DOWNLOAD_DIR, `${source.key}.xlsx`);
   fs.writeFileSync(rawPath, res.data);
-  return await parseXlsxBuffer(res.data);
+  return await parseXlsxBuffer(res.data, opts);
 }
 
-/** Reads a real .xlsx buffer and returns the entity names found in it. */
-async function parseXlsxBuffer(buffer) {
+/** Reads a real .xlsx buffer and returns the entity names found in it, plus
+ * the title-row text (used elsewhere to auto-detect the master list's
+ * "as on <date>" stamp), plus a name->classification map when the file has
+ * a recognisable "Classification" column (RBI's NBFC file does - this is
+ * what BRD issue #3 needs: ICC/CIC/IFC/MFI/P2P/Factor/AA/NOFHC/IDF/etc,
+ * sourced from the regulator's own data instead of a generic label). */
+async function parseXlsxBuffer(buffer, { captureClassification = false } = {}) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
   const names = [];
+  const classifications = new Map(); // entity name -> classification string
+  let titleText = null;
   wb.worksheets.forEach((ws) => {
-    // Collect every non-empty row first, so we can find the REAL header row
-    // rather than assuming it's the first non-empty row. Government sheets
-    // like RBI's routinely start with a title row ("List of NBFCs as on ...")
-    // that has only one populated cell - treating that as the header makes
-    // every later column lookup wrong (e.g. picks the Sl.No. column as "Name").
     const allRows = [];
     ws.eachRow((row) => {
       const values = row.values.slice(1).map((v) => (v == null ? "" : String(v).trim()));
@@ -214,10 +221,17 @@ async function parseXlsxBuffer(buffer) {
     });
 
     const headerIdx = findHeaderRowIndex(allRows);
-    if (headerIdx === -1) return; // no recognisable header on this sheet
+    if (headerIdx === -1) return;
+
+    if (!titleText && headerIdx > 0) {
+      titleText = allRows[0].filter(Boolean).join(" ");
+    }
 
     const headerRow = allRows[headerIdx];
     const nameIdx = guessNameColumnIndex(headerRow);
+    const classificationIdx = captureClassification
+      ? headerRow.findIndex((h) => /^classification$/i.test(h.trim()))
+      : -1;
 
     for (let i = headerIdx + 1; i < allRows.length; i++) {
       const name = (allRows[i][nameIdx] || "").trim();
@@ -227,11 +241,16 @@ async function parseXlsxBuffer(buffer) {
         name.length <= MAX_PLAUSIBLE_NAME_LENGTH
       ) {
         names.push(name);
+        if (classificationIdx !== -1) {
+          const classification = (allRows[i][classificationIdx] || "").trim();
+          if (classification) classifications.set(name, classification);
+        }
       }
     }
   });
-  return dedupe(names);
+  return { names: dedupe(names), titleText, classifications };
 }
+
 
 async function scrapePdfLink(source) {
   const { data: html } = await axios.get(source.url, {
@@ -261,7 +280,7 @@ async function scrapePdfLink(source) {
 
   if (!match) {
     console.warn(`  no matching PDF/XLS link found on ${source.url}`);
-    return [];
+    return { names: [], titleText: null };
   }
 
   return await downloadAndExtract(match.absHref, source);
@@ -278,7 +297,7 @@ async function downloadAndExtract(fileUrl, source) {
 
   if (/\.pdf$/i.test(fileUrl)) {
     const parsed = await pdfParse(res.data);
-    return dedupe(namesFromPdfText(parsed.text));
+    return { names: dedupe(namesFromPdfText(parsed.text)), titleText: null };
   }
 
   // .xlsx/.xls/.csv - leave the raw file in output/downloads for manual
@@ -289,7 +308,7 @@ async function downloadAndExtract(fileUrl, source) {
     `  downloaded ${filename} but did not auto-parse it (non-PDF). ` +
       `Review it manually or extend downloadAndExtract().`
   );
-  return [];
+  return { names: [], titleText: null };
 }
 
 /**
@@ -318,26 +337,37 @@ async function run() {
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
-  const results = [];
+  // Raw per-source hits, before priority-matrix resolution. Each entity can
+  // legitimately appear more than once here (BRD issue #6 - multi-category
+  // entities like ICICI Securities) - that's intentional and resolved below.
+  const rawHits = []; // { name, categoryAsPerReturn, categoryAsPerRegulator, regulator, sourceKey, status }
   const runLog = [];
+  const masterListEntries = []; // { name, status: 'Active' | 'Cancelled' }
+  let masterListTitleText = null;
 
   try {
     for (const source of sources) {
       console.log(`Scraping [${source.key}] ${source.url}`);
       const started = Date.now();
       let names = [];
+      let titleText = null;
+      let classifications = new Map(); // per-entity override of categoryAsPerRegulator (BRD #3)
       let status = "ok";
       let error = null;
 
       try {
         if (source.type === "html_table") {
-          names = await scrapeHtmlTable(source);
+          ({ names, titleText } = await scrapeHtmlTable(source));
         } else if (source.type === "aspx_dynamic") {
-          names = await scrapeAspxDynamic(source, browser);
+          ({ names, titleText } = await scrapeAspxDynamic(source, browser));
         } else if (source.type === "xlsx_direct") {
-          names = await scrapeXlsxDirect(source);
+          ({ names, titleText, classifications } = await scrapeXlsxDirect(source));
         } else if (source.type === "pdf_link") {
-          names = await scrapePdfLink(source);
+          ({ names, titleText } = await scrapePdfLink(source));
+        } else if (source.type === "rbi_banks_custom") {
+          ({ names } = await scrapeRbiBanksCustom(source, browser));
+        } else if (source.type === "rbi_pss_custom") {
+          ({ names } = await scrapeRbiPssCustom(source, browser));
         } else if (source.type === "manual") {
           status = "skipped_manual";
         } else {
@@ -352,14 +382,29 @@ async function run() {
       if (names.length === 0 && status === "ok") status = "empty";
 
       for (const name of names) {
-        results.push({
+        // BRD issue #1: category must come from the regulator-specific
+        // column at the entity level. Per-entity classification (RBI's own
+        // Classification column, when we have it - BRD #3) overrides the
+        // source-level default; otherwise the source's Annex-1 category
+        // applies to every entity from it.
+        const categoryAsPerRegulator = classifications.get(name) || source.categoryAsPerRegulator;
+        rawHits.push({
           name,
-          category: source.reportCategory,
-          classification: source.classification,
-          institution: source.reportCategory,
+          categoryAsPerReturn: source.categoryAsPerReturn,
+          categoryAsPerRegulator,
           regulator: source.regulator,
           sourceKey: source.key,
+          status: source.statusOverride || "Active",
         });
+      }
+
+      if (source.key === "rbi_nbfc" && status === "ok") {
+        masterListEntries.push(...names.map((name) => ({ name, status: "Active" })));
+        masterListTitleText = masterListTitleText || titleText;
+      }
+      if (source.key === "rbi_nbfc_cancelled" && status === "ok") {
+        masterListEntries.push(...names.map((name) => ({ name, status: "Cancelled" })));
+        masterListTitleText = masterListTitleText || titleText;
       }
 
       runLog.push({
@@ -378,11 +423,30 @@ async function run() {
     await browser.close();
   }
 
+  // --- Priority Matrix resolution (BRD issues #5 and #6) ---
+  // An entity scraped under multiple categories keeps ALL of its category
+  // memberships for audit, but gets exactly one final reporting
+  // classification: whichever category ranks highest (lowest rank number)
+  // in the BRD's Priority data sheet.
+  const { resolved, multiCategoryEntities } = resolveWithPriorityMatrix(rawHits);
+
+  // --- Master list + press release reconciliation (BRD requirement) ---
+  let statusReconciliation = null;
+  if (masterListEntries.length > 0) {
+    statusReconciliation = await reconcileWithPressReleases(masterListEntries, masterListTitleText);
+  } else {
+    console.warn(
+      "\nSkipped press-release reconciliation: rbi_nbfc/rbi_nbfc_cancelled " +
+        "didn't produce a usable master list this run (check run-log.json)."
+    );
+  }
+
   const outFile = path.join(OUTPUT_DIR, "Combine_List_Output.xlsx");
-  await writeWorkbook(results, outFile);
+  await writeWorkbook(resolved, outFile, statusReconciliation, multiCategoryEntities);
   fs.writeFileSync(RUN_LOG_PATH, JSON.stringify(runLog, null, 2));
 
-  console.log(`\nWrote ${results.length} rows -> ${outFile}`);
+  console.log(`\nWrote ${resolved.length} resolved entities -> ${outFile}`);
+  console.log(`${multiCategoryEntities.length} entities had multiple category memberships (see 'Multi-Category Entities' sheet)`);
   console.log(`Run log -> ${RUN_LOG_PATH}`);
 
   const failed = runLog.filter((r) => r.status === "error" || r.status === "empty");
@@ -393,6 +457,156 @@ async function run() {
         .join(", ")}. Check run-log.json and output/downloads/.`
     );
   }
+}
+
+/**
+ * Groups raw per-source hits by normalized entity name. Entities appearing
+ * under one category pass through unchanged. Entities appearing under
+ * multiple categories (BRD #6) get a single final category chosen by
+ * Priority Matrix rank (BRD #5), while every category they actually belong
+ * to is preserved in memberships for audit/traceability.
+ */
+function resolveWithPriorityMatrix(rawHits) {
+  const byName = new Map();
+
+  for (const hit of rawHits) {
+    const key = hit.name.toUpperCase().replace(/[.,()]/g, "").replace(/\s+/g, " ").trim();
+    if (!byName.has(key)) byName.set(key, { name: hit.name, memberships: [] });
+    byName.get(key).memberships.push(hit);
+  }
+
+  const resolved = [];
+  const multiCategoryEntities = [];
+
+  for (const { name, memberships } of byName.values()) {
+    const ranked = memberships
+      .map((m) => ({ ...m, rank: getRank(m.categoryAsPerRegulator) }))
+      .sort((a, b) => a.rank - b.rank);
+    const winner = ranked[0];
+
+    resolved.push({
+      name,
+      category: winner.categoryAsPerRegulator,
+      categoryAsPerReturn: winner.categoryAsPerReturn,
+      classification: winner.categoryAsPerRegulator,
+      institution: winner.categoryAsPerReturn,
+      regulator: winner.regulator,
+      sourceKey: winner.sourceKey,
+      status: winner.status,
+      allCategories: memberships.map((m) => m.categoryAsPerRegulator).join(" | "),
+      categoryCount: new Set(memberships.map((m) => m.categoryAsPerRegulator)).size,
+    });
+
+    const distinctCategories = new Set(memberships.map((m) => m.categoryAsPerRegulator));
+    if (distinctCategories.size > 1) {
+      multiCategoryEntities.push({
+        name,
+        finalCategory: winner.categoryAsPerRegulator,
+        finalCategoryRank: winner.rank,
+        allMemberships: ranked.map((m) => ({
+          category: m.categoryAsPerRegulator,
+          rank: m.rank,
+          regulator: m.regulator,
+          sourceKey: m.sourceKey,
+        })),
+      });
+    }
+  }
+
+  return { resolved, multiCategoryEntities };
+}
+
+/** BRD issues #2 and #4: RBI's Banks page needs entity-wise extraction with
+ * correct bank sub-classification - see customParsers.js for why this can't
+ * be a generic table scrape. */
+async function scrapeRbiBanksCustom(source, browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  try {
+    await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
+    const html = await page.content();
+    const { names, note } = parseRbiBanksSection(html, source.bankSection);
+    if (note) console.warn(`  ${note}`);
+    return { names };
+  } finally {
+    await page.close();
+  }
+}
+
+/** BRD issues #2 and #4: RBI's PSS page needs entity-wise extraction per
+ * status category - see customParsers.js. */
+async function scrapeRbiPssCustom(source, browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  try {
+    await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
+    const html = await page.content();
+    const { names, note } = parseRbiPssSection(html, source.pssSection);
+    if (note) console.warn(`  ${note}`);
+    return { names };
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Runs the BRD's master-list + press-release delta logic. Requires a master
+ * list date - tries to auto-detect it from the spreadsheet's own title text
+ * ("... as on June 30, 2026"), falls back to the MASTER_LIST_DATE_OVERRIDE
+ * env var, and skips reconciliation entirely (rather than guessing) if
+ * neither is available.
+ */
+async function reconcileWithPressReleases(masterListEntries, titleText) {
+  const autoDetected = extractMasterListDate(titleText);
+  const override = process.env.MASTER_LIST_DATE_OVERRIDE
+    ? new Date(process.env.MASTER_LIST_DATE_OVERRIDE)
+    : null;
+  const masterListDate = override || autoDetected;
+
+  if (!masterListDate || isNaN(masterListDate)) {
+    console.warn(
+      "\nCould not determine the RBI master list's 'as on' date (auto-detection " +
+        `found: ${JSON.stringify(titleText)}). Skipping press-release reconciliation. ` +
+        "Fix: set the MASTER_LIST_DATE_OVERRIDE env var (e.g. '2026-06-30') in the " +
+        "workflow or your shell, matching the date shown on RBI's list."
+    );
+    return null;
+  }
+
+  console.log(`\nMaster list date: ${masterListDate.toISOString().slice(0, 10)}`);
+  console.log("Scanning RBI press releases since that date for status changes...");
+
+  let deltaResult;
+  try {
+    deltaResult = await fetchNbfcStatusDeltas(masterListDate);
+  } catch (err) {
+    console.error(`  press release scan failed: ${err.message}`);
+    return null;
+  }
+
+  const { deltas, feedMayNotCoverFullRange, oldestItemInFeed } = deltaResult;
+  console.log(`  found ${deltas.length} candidate status-change mention(s)`);
+
+  if (feedMayNotCoverFullRange && oldestItemInFeed) {
+    console.warn(
+      `  NOTE: RBI's RSS feed's oldest item is from ${oldestItemInFeed
+        .toISOString()
+        .slice(0, 10)}, which is after the master list date. If the scraper ` +
+        "hasn't been running continuously since the master list date, older " +
+        "changes in that gap may be missing - see src/pressReleases.js header."
+    );
+  }
+
+  const { merged, unmatchedDeltas } = mergeStatuses(masterListEntries, deltas);
+  const changedCount = merged.filter((m) => m.statusHistory.length > 0).length;
+  console.log(`  ${changedCount} entities had a status change applied`);
+
+  return {
+    masterListDate: masterListDate.toISOString().slice(0, 10),
+    merged,
+    unmatchedDeltas,
+    unattributedDeltas: deltas.filter((d) => !d.entityName),
+  };
 }
 
 run().catch((err) => {

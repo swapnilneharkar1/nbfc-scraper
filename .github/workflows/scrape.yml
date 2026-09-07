@@ -2,11 +2,13 @@ name: Scrape NBFC/FII lists
 
 on:
   schedule:
+    # Runs 03:00 UTC (08:30 IST) every Monday. Adjust to taste - the source
+    # regulators mostly update quarterly/monthly, weekly is a safe cadence.
     - cron: "0 3 * * 1"
-  workflow_dispatch: {}
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
 
 permissions:
-  contents: write
+  contents: write   # needed only if you want the workflow to commit output/ back
 
 jobs:
   scrape:
@@ -19,10 +21,11 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Chrome for Puppeteer
         run: npx puppeteer browsers install chrome
@@ -30,8 +33,12 @@ jobs:
       - name: Run scraper
         run: npm run scrape
         env:
+          # Optional override if RBI's spreadsheet doesn't state an "as on
+          # <date>" line the auto-detector can find. Format: YYYY-MM-DD.
+          # Leave unset to rely on auto-detection.
           MASTER_LIST_DATE_OVERRIDE: ""
 
+      # Option A: keep the output as a downloadable build artifact
       - name: Upload output as artifact
         uses: actions/upload-artifact@v4
         with:
@@ -40,3 +47,16 @@ jobs:
             output/Combine_List_Output.xlsx
             output/run-log.json
           retention-days: 90
+
+      # Option B (optional): commit the fresh Excel file straight into the
+      # repo, e.g. into /data, so it's always at a stable URL. Uncomment if
+      # you'd rather have that than download-per-run artifacts.
+      # - name: Commit updated output
+      #   run: |
+      #     git config user.name "github-actions[bot]"
+      #     git config user.email "github-actions[bot]@users.noreply.github.com"
+      #     mkdir -p data
+      #     cp output/Combine_List_Output.xlsx data/Combine_List_Output.xlsx
+      #     git add data/Combine_List_Output.xlsx
+      #     git diff --cached --quiet || git commit -m "chore: refresh scraped entity list [skip ci]"
+      #     git push

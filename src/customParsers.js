@@ -18,6 +18,35 @@
 import * as cheerio from "cheerio";
 
 // ---------------------------------------------------------------------
+// SEBI "Recognised Intermediaries" pages
+// ---------------------------------------------------------------------
+// Confirmed by direct inspection: these pages have NO <table> element at
+// all - they're a repeated "Name / Registration No. / E-mail / Telephone /
+// Address / Contact Person / ... / Validity" label-value block per entity,
+// server-rendered as plain HTML (no JS execution needed - a simple fetch
+// sees the same content). The generic extractTables() approach in
+// scraper.js was correctly finding nothing, because there genuinely is no
+// <table> to find - this needs a bespoke label-value parser instead.
+
+/**
+ * @param {string} html - HTML of a SEBI OtherAction.do?doRecognisedFpi=yes&intmId=N page
+ */
+export function parseSebiIntermediaryPage(html) {
+  const $ = cheerio.load(html);
+  const text = $.root().text().replace(/[ \t]+/g, " ").replace(/\n+/g, "\n").trim();
+
+  // Every entity block starts with a "Name" label immediately followed by
+  // the entity name, then "Registration No." - this pair is unique enough
+  // to reliably delimit entities even though the page has no table markup.
+  const matches = [...text.matchAll(/\bName\s*\n?\s*(.+?)\s*\n?\s*Registration No\./g)];
+  const names = matches
+    .map((m) => m[1].trim())
+    .filter((name) => name.length >= 3 && name.length <= 150 && !/^\d+$/.test(name));
+
+  return { names: [...new Set(names)], note: names.length === 0 ? "No Name/Registration No. pairs found - SEBI may have changed this page's layout." : null };
+}
+
+// ---------------------------------------------------------------------
 // RBI Banks page
 // ---------------------------------------------------------------------
 
@@ -104,9 +133,20 @@ const PSS_SECTION_HEADINGS = {
   operating: /A\.\s*Certificates of Authorisation issued/i,
   revoked: /B\.\s*Certificates of Authorisation Revoked/i,
   ceased: /C\.\s*Authorised entities whose Payment System operations have ceased/i,
-  cancelled: /D\.\s*Entities whose Certificate of Authorisation[\s\S]{0,40}voluntary surrender/i,
+  // Real heading text (confirmed): "D. Entities whose Certificate of
+  // Authorisation to operate a Payment System have been cancelled on
+  // account of voluntary surrender by the entity" - the gap between
+  // "Authorisation" and "voluntary surrender" is ~65 chars, so the previous
+  // {0,40} cap silently failed to match this section at all. Also splitting
+  // D (voluntary surrender) and E (regulatory cancellation) into their own
+  // categories - they were previously lumped into one "cancelled" bucket
+  // and D's mismatch meant E's content leaked into it uncontrolled.
+  surrendered: /D\.\s*Entities whose Certificate of Authorisation[\s\S]{0,150}voluntary surrender/i,
+  cancelled_regulatory: /E\.\s*Entities whose Certificate of Authorisation[\s\S]{0,150}regulatory requirement/i,
 };
-const NEXT_SECTION_MARKER = /\b[A-F]\.\s*(Certificates|Authorised|Entities)/;
+// Case-insensitive on the letter too - RBI's page uses a lowercase "f." for
+// the "under process of cancellation" section, confirmed by inspection.
+const NEXT_SECTION_MARKER = /\b[A-Fa-f]\.\s*(Certificates|Authorised|Entities)/;
 
 function looksLikeEntityName(candidate) {
   const c = candidate.trim();

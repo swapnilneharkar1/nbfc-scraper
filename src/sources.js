@@ -86,13 +86,28 @@ export const sources = [
     pssSection: "ceased",
   },
   {
+    key: "rbi_pss_surrendered",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "PSS Surrender/Cancelled",
+    regulator: "RBI",
+    url: "https://www.rbi.org.in/Scripts/PublicationsView.aspx?id=12043",
+    type: "rbi_pss_custom",
+    pssSection: "surrendered",
+    notes:
+      "Section D (voluntary surrender). Previously lumped with section E " +
+      "under one 'cancelled' key and the heading regex's character-gap cap " +
+      "was too short to match the real heading text at all, so this section " +
+      "silently returned zero rows - fixed and split into its own category.",
+  },
+  {
     key: "rbi_pss_cancelled",
     categoryAsPerReturn: "Other Financial Entities",
     categoryAsPerRegulator: "PSS Surrender/Cancelled",
     regulator: "RBI",
     url: "https://www.rbi.org.in/Scripts/PublicationsView.aspx?id=12043",
     type: "rbi_pss_custom",
-    pssSection: "cancelled",
+    pssSection: "cancelled_regulatory",
+    notes: "Section E (cancelled per regulatory requirement) - now separated from section D above.",
   },
 
   {
@@ -101,8 +116,14 @@ export const sources = [
     categoryAsPerRegulator: "HFCs",
     regulator: "NHB",
     url: "https://www.nhb.org.in/supervision/list-of-hfcs-in-india/",
+    fileUrl: "https://www.nhb.org.in/Regulation/Registered_Companies.pdf",
     type: "pdf_link",
-    linkPattern: /list.*hfc.*\.pdf$/i,
+    notes:
+      "Previous version searched the landing page for a link matching " +
+      "/list.*hfc.*\\.pdf$/i and found nothing - the real file is named " +
+      "Registered_Companies.pdf, which doesn't match that pattern at all. " +
+      "Now points directly at the confirmed real URL instead of guessing " +
+      "from a link-text pattern.",
   },
 
   {
@@ -235,8 +256,7 @@ export const sources = [
     categoryAsPerRegulator: "Credit Rating Agency",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=7",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_venture_capital",
@@ -244,8 +264,7 @@ export const sources = [
     categoryAsPerRegulator: "Venture Capital Funds",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=21",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_foreign_vc",
@@ -253,8 +272,7 @@ export const sources = [
     categoryAsPerRegulator: "Registered Foreign Venture Capital Investors",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=25",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_investment_adviser",
@@ -262,8 +280,7 @@ export const sources = [
     categoryAsPerRegulator: "Investment Adviser",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=13",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_broker_equity",
@@ -271,8 +288,7 @@ export const sources = [
     categoryAsPerRegulator: "Stock Brokers in equity segment",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=30",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_broker_equity_derivative",
@@ -280,8 +296,7 @@ export const sources = [
     categoryAsPerRegulator: "Stock Brokers in Equity Derivative Segment",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=31",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_broker_commodity_derivative",
@@ -289,8 +304,7 @@ export const sources = [
     categoryAsPerRegulator: "Stock Brokers in Commodity Derivative",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=2",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_broker_debt",
@@ -298,8 +312,7 @@ export const sources = [
     categoryAsPerRegulator: "Stock Brokers in Debt Segement",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=37",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_broker_interest_rate_derivative",
@@ -307,8 +320,7 @@ export const sources = [
     categoryAsPerRegulator: "Stock Brokers in Interest Rate Derivative",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=38",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_broker_currency_derivative",
@@ -316,8 +328,7 @@ export const sources = [
     categoryAsPerRegulator: "Stock Brokers in Currency Derivative Segment",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=32",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_portfolio_managers",
@@ -325,8 +336,7 @@ export const sources = [
     categoryAsPerRegulator: "Registered Portfolio Managers",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=33",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_mutual_funds",
@@ -334,8 +344,7 @@ export const sources = [
     categoryAsPerRegulator: "Mutual Funds",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=23",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_dp_cdsl",
@@ -343,8 +352,7 @@ export const sources = [
     categoryAsPerRegulator: "Depository Participants - CDSL",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=18",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_dp_nsdl",
@@ -352,8 +360,7 @@ export const sources = [
     categoryAsPerRegulator: "Depository Participants - NSDL",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=19",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_merchant_bankers",
@@ -361,8 +368,7 @@ export const sources = [
     categoryAsPerRegulator: "Merchant Banker",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=9",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_debenture_trustee",
@@ -370,8 +376,7 @@ export const sources = [
     categoryAsPerRegulator: "Debentures Trustee",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=6",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_custodians",
@@ -379,8 +384,7 @@ export const sources = [
     categoryAsPerRegulator: "Registered Custodians",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=27",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_share_transfer_agent",
@@ -388,8 +392,7 @@ export const sources = [
     categoryAsPerRegulator: "Share Transfer Agent",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=10",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
   {
     key: "sebi_banker_to_issue",
@@ -397,8 +400,7 @@ export const sources = [
     categoryAsPerRegulator: "Banker to an Issue",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=5",
-    type: "html_table",
-    tableSelector: "table",
+    type: "sebi_intermediary_custom",
   },
 
   {
@@ -407,8 +409,16 @@ export const sources = [
     categoryAsPerRegulator: "Pension Fund",
     regulator: "PFRDA",
     url: "https://www.pfrda.org.in/index1.cshtml?lsid=191",
-    type: "html_table",
+    type: "aspx_dynamic",
     tableSelector: "table",
+    notes:
+      "Upgraded from html_table to aspx_dynamic (Puppeteer-rendered) after " +
+      "this source returned zero rows in a real run - PFRDA's newer " +
+      "intermediaries subdomain blocks automated fetching entirely (robots " +
+      "disallow), so I could not directly verify this .cshtml page's exact " +
+      "markup the way I did for SEBI. This is a reasonable improvement, not " +
+      "a confirmed fix - check run-log.json for this source specifically " +
+      "after the next run.",
   },
 
   {

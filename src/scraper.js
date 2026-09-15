@@ -24,7 +24,7 @@ import { sources } from "./sources.js";
 import { writeWorkbook } from "./excelWriter.js";
 import { fetchNbfcStatusDeltas } from "./pressReleases.js";
 import { mergeStatuses, extractMasterListDate } from "./statusMerge.js";
-import { parseRbiBanksSection, parseRbiPssSection } from "./customParsers.js";
+import { parseRbiBanksSection, parseRbiPssSection, parseSebiIntermediaryPage } from "./customParsers.js";
 import { getRank } from "./priorityMatrix.js";
 
 const OUTPUT_DIR = path.resolve("output");
@@ -253,6 +253,15 @@ async function parseXlsxBuffer(buffer, { captureClassification = false } = {}) {
 
 
 async function scrapePdfLink(source) {
+  // If we already know the direct file URL (verified by hand rather than
+  // discovered via link-pattern guessing), skip the landing-page search
+  // entirely - it's both faster and more reliable than pattern-matching
+  // link text/hrefs, which breaks the moment the actual filename doesn't
+  // match the guessed pattern (confirmed happening for nhb_hfc).
+  if (source.fileUrl) {
+    return await downloadAndExtract(source.fileUrl, source);
+  }
+
   const { data: html } = await axios.get(source.url, {
     headers: { "User-Agent": USER_AGENT },
     timeout: 30000,
@@ -272,11 +281,10 @@ async function scrapePdfLink(source) {
 
   const match = links
     .map((l) => ({ ...l, absHref: abs(l.href) }))
-    .find(
-      (l) =>
-        l.absHref &&
-        (source.linkPattern.test(l.absHref) || source.linkPattern.test(l.text))
-    );
+    .find((l) => {
+      const pattern = source.linkPattern || /\.(pdf|xlsx?|csv)$/i;
+      return l.absHref && (pattern.test(l.absHref) || pattern.test(l.text));
+    });
 
   if (!match) {
     console.warn(`  no matching PDF/XLS link found on ${source.url}`);
@@ -368,6 +376,8 @@ async function run() {
           ({ names } = await scrapeRbiBanksCustom(source, browser));
         } else if (source.type === "rbi_pss_custom") {
           ({ names } = await scrapeRbiPssCustom(source, browser));
+        } else if (source.type === "sebi_intermediary_custom") {
+          ({ names } = await scrapeSebiIntermediaryCustom(source));
         } else if (source.type === "manual") {
           status = "skipped_manual";
         } else {
@@ -547,6 +557,22 @@ async function scrapeRbiPssCustom(source, browser) {
   } finally {
     await page.close();
   }
+}
+
+/** BRD-relevant fix: SEBI's "Recognised Intermediaries" pages have no real
+ * <table> markup - see customParsers.js's parseSebiIntermediaryPage for why
+ * that made every SEBI source silently return zero rows. Confirmed these
+ * pages are plain server-rendered HTML (a simple fetch sees full content),
+ * so - unlike the RBI Banks/PSS pages - this doesn't need Puppeteer at all,
+ * just a different parser than the generic table extractor. */
+async function scrapeSebiIntermediaryCustom(source) {
+  const { data: html } = await axios.get(source.url, {
+    headers: { "User-Agent": USER_AGENT },
+    timeout: 30000,
+  });
+  const { names, note } = parseSebiIntermediaryPage(html);
+  if (note) console.warn(`  ${note}`);
+  return { names };
 }
 
 /**

@@ -177,7 +177,60 @@ function looksLikeEntityName(candidate) {
   return true;
 }
 
-function extractEntityNames(plainText) {
+/**
+ * Extracts entity names from a genuine <table> on the press-release page -
+ * confirmed to be how RBI formats BULK cancellation notices (e.g. "cancels
+ * ... of 59 NBFCs"): a real table with columns like "Sr. No. | Name of the
+ * Company | Registered Office Address | CoR No. | CoR Issued on |
+ * Cancellation Order Date". Reuses the same header-detection approach as
+ * the rest of this project (skip title rows, find the row with a
+ * name/company-ish header, take that column).
+ */
+function extractFromTable(html) {
+  const $ = cheerio.load(html);
+  const names = [];
+
+  $("table").each((_, tableEl) => {
+    const rows = [];
+    $(tableEl)
+      .find("tr")
+      .each((__, trEl) => {
+        const cells = $(trEl)
+          .find("th,td")
+          .map((___, cellEl) => $(cellEl).text().replace(/\s+/g, " ").trim())
+          .get();
+        if (cells.some((c) => c.length > 0)) rows.push(cells);
+      });
+    if (rows.length < 2) return;
+
+    const headerIdx = rows.findIndex((r) =>
+      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    );
+    if (headerIdx === -1) return;
+
+    const headerRow = rows[headerIdx];
+    const nameIdx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
+    if (nameIdx === -1) return;
+
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const name = (rows[i][nameIdx] || "").trim();
+      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
+        names.push(name);
+      }
+    }
+  });
+
+  return [...new Set(names)];
+}
+
+/**
+ * Extracts entity names from a numbered list embedded in free-form prose
+ * (e.g. small notices: "...of the following companies: 1. ABC Finance Ltd
+ * 2. XYZ Capital Ltd ..."). This is the fallback for releases that don't
+ * use a real table - confirmed both formats exist across different RBI
+ * press releases, not just one or the other.
+ */
+function extractFromProseList(plainText) {
   const chunks = plainText.split(/(?:^|\s)(\d{1,3})\.\s+/).filter(Boolean);
   const candidates = chunks.filter((c) => !/^\d{1,3}$/.test(c));
   const names = [];
@@ -187,6 +240,17 @@ function extractEntityNames(plainText) {
     if (looksLikeEntityName(candidate)) names.push(candidate);
   }
   return [...new Set(names)];
+}
+
+/**
+ * Combined extractor: tries the real-table format first (confirmed to be
+ * how RBI's bulk cancellation notices are built), falls back to the
+ * prose-list format for smaller/differently-worded releases.
+ */
+function extractEntityNames(html) {
+  const fromTable = extractFromTable(html);
+  if (fromTable.length > 0) return fromTable;
+  return extractFromProseList(htmlToText(html));
 }
 
 /**
@@ -230,7 +294,7 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
             headers: { "User-Agent": USER_AGENT },
             timeout: 20000,
           });
-          names = extractEntityNames(htmlToText(releaseHtml));
+          names = extractEntityNames(releaseHtml);
         } catch (err) {
           monthNotes.push(`Failed to fetch release detail at ${entry.link}: ${err.message}`);
         }

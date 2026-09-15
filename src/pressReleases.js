@@ -96,11 +96,57 @@ function looksLikeEntityName(candidate) {
 }
 
 /**
+ * Extracts entity names from a genuine <table> in the release's HTML -
+ * confirmed to be how RBI formats BULK cancellation notices (e.g. "cancels
+ * ... of 59 NBFCs"): a real table with columns like "Sr. No. | Name of the
+ * Company | Registered Office Address | ...". A numbered-prose regex
+ * requiring "1." will never match this format's "1 Company Name" (no
+ * period) - this was a real bug, confirmed by fetching an actual RBI
+ * release page and finding zero matches despite the data being right there
+ * in a table. NOTE: RSS <description> fields are sometimes truncated/
+ * simplified compared to the full page, so this may not always have a
+ * table to find even when the source page does - that's fine, it falls
+ * through to the prose extractor below in that case.
+ */
+function extractFromTable(html) {
+  const $ = cheerio.load(html);
+  const names = [];
+  $("table").each((_, tableEl) => {
+    const rows = [];
+    $(tableEl)
+      .find("tr")
+      .each((__, trEl) => {
+        const cells = $(trEl)
+          .find("th,td")
+          .map((___, cellEl) => $(cellEl).text().replace(/\s+/g, " ").trim())
+          .get();
+        if (cells.some((c) => c.length > 0)) rows.push(cells);
+      });
+    if (rows.length < 2) return;
+    const headerIdx = rows.findIndex((r) =>
+      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    );
+    if (headerIdx === -1) return;
+    const headerRow = rows[headerIdx];
+    const nameIdx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
+    if (nameIdx === -1) return;
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const name = (rows[i][nameIdx] || "").trim();
+      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
+        names.push(name);
+      }
+    }
+  });
+  return [...new Set(names)];
+}
+
+/**
  * Best-effort extraction of entity names from a numbered/lettered list
  * embedded in press-release prose, e.g. "...of the following companies:
  * 1. ABC Finance Ltd 2. XYZ Capital Ltd ...". See file header for caveats.
+ * Fallback for releases that aren't table-formatted.
  */
-function extractEntityNames(plainText) {
+function extractFromProseList(plainText) {
   const chunks = plainText.split(/(?:^|\s)(\d{1,3})\.\s+/).filter(Boolean);
   // split() with a capturing group interleaves the numbers themselves into
   // the array - drop pure-number entries and keep the text chunks.
@@ -115,6 +161,14 @@ function extractEntityNames(plainText) {
     if (looksLikeEntityName(candidate)) names.push(candidate);
   }
   return [...new Set(names)];
+}
+
+/** Combined extractor: real table first (bulk notices), prose-list fallback
+ * (smaller/differently-worded releases). */
+function extractEntityNames(html) {
+  const fromTable = extractFromTable(html);
+  if (fromTable.length > 0) return fromTable;
+  return extractFromProseList(htmlToText(html));
 }
 
 /**
@@ -136,8 +190,7 @@ export async function fetchNbfcStatusDeltas(sinceDate) {
     const matched = ACTION_PATTERNS.find((p) => p.pattern.test(item.title));
     if (!matched) continue;
 
-    const plainText = htmlToText(item.descriptionHtml);
-    const names = extractEntityNames(plainText);
+    const names = extractEntityNames(item.descriptionHtml);
 
     if (names.length === 0) {
       // Couldn't confidently pull names - still record that *something*

@@ -23,6 +23,7 @@ import ExcelJS from "exceljs";
 import { sources } from "./sources.js";
 import { writeWorkbook } from "./excelWriter.js";
 import { fetchNbfcStatusDeltas } from "./pressReleases.js";
+import { fetchNbfcStatusDeltasFromArchive } from "./pressReleaseArchive.js";
 import { mergeStatuses, extractMasterListDate } from "./statusMerge.js";
 import { parseRbiBanksSection, parseRbiPssSection, parseSebiIntermediaryPage } from "./customParsers.js";
 import { getRank } from "./priorityMatrix.js";
@@ -352,6 +353,7 @@ async function run() {
   const runLog = [];
   const masterListEntries = []; // { name, status: 'Active' | 'Cancelled' }
   let masterListTitleText = null;
+  let statusReconciliation = null;
 
   try {
     for (const source of sources) {
@@ -429,6 +431,18 @@ async function run() {
 
       console.log(`  -> ${status}, ${names.length} names`);
     }
+
+    // --- Master list + press release reconciliation (BRD requirement) ---
+    // Runs here, still inside the browser's lifetime, since the archive
+    // crawler needs Puppeteer to click through RBI's month/year filters.
+    if (masterListEntries.length > 0) {
+      statusReconciliation = await reconcileWithPressReleases(masterListEntries, masterListTitleText, browser);
+    } else {
+      console.warn(
+        "\nSkipped press-release reconciliation: rbi_nbfc/rbi_nbfc_cancelled " +
+          "didn't produce a usable master list this run (check run-log.json)."
+      );
+    }
   } finally {
     await browser.close();
   }
@@ -439,17 +453,6 @@ async function run() {
   // classification: whichever category ranks highest (lowest rank number)
   // in the BRD's Priority data sheet.
   const { resolved, multiCategoryEntities } = resolveWithPriorityMatrix(rawHits);
-
-  // --- Master list + press release reconciliation (BRD requirement) ---
-  let statusReconciliation = null;
-  if (masterListEntries.length > 0) {
-    statusReconciliation = await reconcileWithPressReleases(masterListEntries, masterListTitleText);
-  } else {
-    console.warn(
-      "\nSkipped press-release reconciliation: rbi_nbfc/rbi_nbfc_cancelled " +
-        "didn't produce a usable master list this run (check run-log.json)."
-    );
-  }
 
   const outFile = path.join(OUTPUT_DIR, "Combine_List_Output.xlsx");
   await writeWorkbook(resolved, outFile, statusReconciliation, multiCategoryEntities);
@@ -582,7 +585,7 @@ async function scrapeSebiIntermediaryCustom(source) {
  * env var, and skips reconciliation entirely (rather than guessing) if
  * neither is available.
  */
-async function reconcileWithPressReleases(masterListEntries, titleText) {
+async function reconcileWithPressReleases(masterListEntries, titleText, browser) {
   const autoDetected = extractMasterListDate(titleText);
   const override = process.env.MASTER_LIST_DATE_OVERRIDE
     ? new Date(process.env.MASTER_LIST_DATE_OVERRIDE)
@@ -600,28 +603,36 @@ async function reconcileWithPressReleases(masterListEntries, titleText) {
   }
 
   console.log(`\nMaster list date: ${masterListDate.toISOString().slice(0, 10)}`);
-  console.log("Scanning RBI press releases since that date for status changes...");
+  console.log("Scanning RBI's press-release archive since that date for status changes...");
 
-  let deltaResult;
+  // Archive crawl is the primary, durable source (goes back as far as
+  // needed via month-by-month navigation). RSS is kept as a fast
+  // supplementary check afterward, purely in case something was published
+  // in the last few hours and the archive page hasn't indexed it yet -
+  // deduplicated against the archive results before merging.
+  let archiveDeltas = [];
   try {
-    deltaResult = await fetchNbfcStatusDeltas(masterListDate);
+    const archiveResult = await fetchNbfcStatusDeltasFromArchive(masterListDate, browser);
+    archiveDeltas = archiveResult.deltas;
+    console.log(`  archive: scanned ${archiveResult.monthsScanned} month(s), found ${archiveDeltas.length} candidate mention(s)`);
+    for (const note of archiveResult.monthNotes) console.warn(`  archive note: ${note}`);
   } catch (err) {
-    console.error(`  press release scan failed: ${err.message}`);
-    return null;
+    console.error(`  archive scan failed: ${err.message}`);
   }
 
-  const { deltas, feedMayNotCoverFullRange, oldestItemInFeed } = deltaResult;
-  console.log(`  found ${deltas.length} candidate status-change mention(s)`);
-
-  if (feedMayNotCoverFullRange && oldestItemInFeed) {
-    console.warn(
-      `  NOTE: RBI's RSS feed's oldest item is from ${oldestItemInFeed
-        .toISOString()
-        .slice(0, 10)}, which is after the master list date. If the scraper ` +
-        "hasn't been running continuously since the master list date, older " +
-        "changes in that gap may be missing - see src/pressReleases.js header."
-    );
+  let rssDeltas = [];
+  try {
+    const rssResult = await fetchNbfcStatusDeltas(masterListDate);
+    rssDeltas = rssResult.deltas;
+    console.log(`  RSS supplementary check: found ${rssDeltas.length} candidate mention(s)`);
+  } catch (err) {
+    console.error(`  RSS supplementary check failed: ${err.message}`);
   }
+
+  const seen = new Set(archiveDeltas.map((d) => `${d.prLink}|${d.entityName}`));
+  const dedupedRss = rssDeltas.filter((d) => !seen.has(`${d.prLink}|${d.entityName}`));
+  const deltas = [...archiveDeltas, ...dedupedRss];
+  console.log(`  ${deltas.length} total candidate status-change mention(s) after combining archive + RSS`);
 
   const { merged, unmatchedDeltas } = mergeStatuses(masterListEntries, deltas);
   const changedCount = merged.filter((m) => m.statusHistory.length > 0).length;

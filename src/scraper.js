@@ -577,31 +577,85 @@ async function scrapeRbiPssCustom(source, browser) {
  * entirely - Puppeteer clicks it before reading the page. Categories small
  * enough to never paginate (like Credit Rating Agency) simply won't have
  * this link, which is handled gracefully (click attempt just no-ops). */
+/** Confirmed by direct inspection: SEBI's category pages paginate at 25
+ * records per page for larger categories (e.g. "1 to 25 of 57 records"),
+ * with a "Show All Records" link (onclick="javascript: searchAllIntm();")
+ * meant to bypass it. A previous version clicked this link, but multiple
+ * live runs still showed several categories capped at exactly 25 - a
+ * strong sign the click isn't actually taking effect (page.evaluate's
+ * .click() doesn't always trigger the same event chain a real user click
+ * does, especially for javascript:-href links parsed oddly by some SEBI
+ * pages, and a full page reload needs waitForNavigation, not just
+ * waitForNetworkIdle, or the old DOM gets read before the new one loads).
+ * This version: (a) tries multiple ways of triggering the same action,
+ * (b) races waitForNavigation against waitForNetworkIdle since it's
+ * unknown which mechanism SEBI actually uses, (c) crucially, compares the
+ * extracted count BEFORE and AFTER the click attempt and logs a clear
+ * diagnostic either way, so the next run's logs settle definitively
+ * whether this is working - no more guessing from row counts alone. */
 async function scrapeSebiIntermediaryCustom(source, browser) {
   const page = await browser.newPage();
   await page.setUserAgent(USER_AGENT);
   try {
     await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
 
-    const clicked = await page.evaluate(() => {
-      const link = Array.from(document.querySelectorAll("a")).find(
+    const beforeHtml = await page.content();
+    const beforeCount = parseSebiIntermediaryPage(beforeHtml).names.length;
+
+    const hasShowAllLink = await page.evaluate(() => {
+      return !!Array.from(document.querySelectorAll("a")).find(
         (a) => /show all records/i.test(a.textContent) || /searchAllIntm/.test(a.getAttribute("onclick") || "")
       );
-      if (link) {
-        link.click();
-        return true;
-      }
-      return false;
     });
 
-    if (clicked) {
-      await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {});
+    if (hasShowAllLink) {
+      try {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => null),
+          page.evaluate(() => {
+            const link = Array.from(document.querySelectorAll("a")).find(
+              (a) => /show all records/i.test(a.textContent) || /searchAllIntm/.test(a.getAttribute("onclick") || "")
+            );
+            // Prefer invoking the underlying function directly if we can
+            // parse it out of the onclick attribute - more reliable than
+            // .click() for javascript:-style links, which some browsers /
+            // headless setups handle inconsistently.
+            const onclick = link && link.getAttribute("onclick");
+            const fnMatch = onclick && onclick.match(/([a-zA-Z_]+\([^)]*\))/);
+            if (fnMatch && typeof window[fnMatch[1].split("(")[0]] === "function") {
+              window[fnMatch[1].split("(")[0]]();
+            } else if (link) {
+              link.click();
+            }
+          }),
+        ]);
+      } catch {
+        // Navigation-based approach failed - not necessarily fatal, the
+        // click may still have triggered an AJAX update instead of a full
+        // page reload. Fall through to the network-idle wait below.
+      }
+      await page.waitForNetworkIdle({ idleTime: 1000, timeout: 20000 }).catch(() => {});
+      // Extra fixed delay as a last-resort safety net - some gov sites are
+      // slow enough that networkidle fires before content actually swaps in.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
 
-    const html = await page.content();
-    const { names, note } = parseSebiIntermediaryPage(html);
+    const afterHtml = await page.content();
+    const { names, note } = parseSebiIntermediaryPage(afterHtml);
     if (note) console.warn(`  ${note}`);
-    if (!clicked) console.log(`  (no 'Show All Records' link found - category likely small enough to fit one page)`);
+
+    if (!hasShowAllLink) {
+      console.log(`  (no 'Show All Records' link found - category likely small enough to fit one page)`);
+    } else if (names.length <= beforeCount) {
+      console.warn(
+        `  WARNING: 'Show All Records' click did not increase the row count ` +
+          `(before: ${beforeCount}, after: ${names.length}) - the click is likely ` +
+          `not taking effect. This source's data may be incomplete (page-1-only).`
+      );
+    } else {
+      console.log(`  'Show All Records' click worked: ${beforeCount} -> ${names.length} rows`);
+    }
+
     return { names };
   } finally {
     await page.close();

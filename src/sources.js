@@ -150,8 +150,14 @@ export const sources = [
     categoryAsPerRegulator: "Local Area Banks (LAB)",
     regulator: "RBI",
     url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
-    type: "rbi_banks_custom",
-    bankSection: "lab",
+    fileUrl: "https://www.rbi.org.in/commonman/Upload/English/Content/PDFs/LAB01112021.pdf",
+    type: "pdf_link",
+    notes:
+      "The Banks page has no distinct clean LAB list (confirmed empty in a " +
+      "real run) - found this direct RBI-hosted PDF instead via search. " +
+      "There are only ~2 LABs in India and this list rarely changes, so a " +
+      "PDF that's a few years old is still very likely current, but worth " +
+      "a periodic manual spot-check given its age.",
   },
   {
     key: "rbi_bank_sfb",
@@ -408,17 +414,17 @@ export const sources = [
     categoryAsPerReturn: "Pension Funds",
     categoryAsPerRegulator: "Pension Fund",
     regulator: "PFRDA",
-    url: "https://www.pfrda.org.in/index1.cshtml?lsid=191",
+    url: "https://www.pfrda.org.in/web/pfrda/intermediaries/registered-intermediaries/pension-funds",
     type: "aspx_dynamic",
     tableSelector: "table",
     notes:
-      "Upgraded from html_table to aspx_dynamic (Puppeteer-rendered) after " +
-      "this source returned zero rows in a real run - PFRDA's newer " +
-      "intermediaries subdomain blocks automated fetching entirely (robots " +
-      "disallow), so I could not directly verify this .cshtml page's exact " +
-      "markup the way I did for SEBI. This is a reasonable improvement, not " +
-      "a confirmed fix - check run-log.json for this source specifically " +
-      "after the next run.",
+      "PFRDA migrated their entire site to a new CMS - the old " +
+      "index1.cshtml?lsid=191 URL is stale, confirmed by web search: the " +
+      "genuinely current page is this one. Could not directly inspect its " +
+      "exact markup (my search/fetch tooling is blocked by this domain's " +
+      "robots.txt), so this points at the right URL but the extraction " +
+      "approach is still a best guess - check run-log.json after the next " +
+      "run and adjust tableSelector if it still returns empty.",
   },
 
   {

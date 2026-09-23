@@ -385,6 +385,28 @@ async function run() {
   }
 
   try {
+    // Open one persistent "hub" tab, configured to capture real file
+    // downloads to disk via CDP, reused across every SEBI source's
+    // Download-button attempt - see tryDownloadFromHub / scrapeSebiIntermediaryCustom.
+    let sebiHubPage = null;
+    try {
+      sebiHubPage = await browser.newPage();
+      await sebiHubPage.setUserAgent(USER_AGENT);
+      const client = await sebiHubPage.target().createCDPSession();
+      fs.mkdirSync(SEBI_DOWNLOAD_DIR, { recursive: true });
+      await client.send("Page.setDownloadBehavior", {
+        behavior: "allow",
+        downloadPath: SEBI_DOWNLOAD_DIR,
+      });
+      await sebiHubPage.goto("https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognised=yes", {
+        waitUntil: "networkidle2",
+        timeout: 45000,
+      });
+    } catch (err) {
+      console.warn(`Could not set up SEBI hub download page (${err.message}) - Download-button attempts will be skipped, pagination fallback only.`);
+      sebiHubPage = null;
+    }
+
     for (const source of sources) {
       console.log(`Scraping [${source.key}] ${source.url}`);
       const started = Date.now();
@@ -414,7 +436,7 @@ async function run() {
             try {
               const intmIdMatch = source.url.match(/intmId=(\d+)/);
               const expectedCount = intmIdMatch ? sebiHubCounts.get(intmIdMatch[1])?.expectedCount : null;
-              ({ names } = await scrapeSebiIntermediaryCustom(source, sebiPage, expectedCount));
+              ({ names } = await scrapeSebiIntermediaryCustom(source, sebiPage, expectedCount, sebiHubPage));
             } finally {
               await sebiPage.close();
             }
@@ -650,7 +672,112 @@ async function scrapeRbiPssCustom(source, browser) {
  * several common patterns generically. Expect this to need tuning against
  * the real live page, same as every other custom parser in this project.
  */
-async function scrapeSebiIntermediaryCustom(source, page, expectedCount) {
+const SEBI_DOWNLOAD_DIR = path.resolve("output", "sebi-downloads");
+
+/**
+ * Attempts to get a category's full record list via SEBI's own "Download"
+ * button on the hub page (doRecognised=yes), using Chrome's native download
+ * handling (via CDP Page.setDownloadBehavior) to capture whatever file it
+ * produces - CSV, Excel, or PDF. This exists because the Download link's
+ * real behaviour is wired through a JS event listener that isn't visible to
+ * any static HTML fetch (confirmed by checking both markdown and raw HTML
+ * extraction - the href is always the placeholder "javascript: void(0);"
+ * either way), so the only way to find out what it actually produces is to
+ * let a real browser click it and see what file appears.
+ *
+ * Returns null (not an empty array) if no file appeared in time, so the
+ * caller can distinguish "genuinely got zero records" from "this approach
+ * didn't work for this category, fall back to pagination."
+ */
+async function tryDownloadFromHub(hubPage, intmId) {
+  fs.mkdirSync(SEBI_DOWNLOAD_DIR, { recursive: true });
+  const before = new Set(fs.readdirSync(SEBI_DOWNLOAD_DIR));
+
+  const clicked = await hubPage.evaluate((intmId) => {
+    const rowLink = Array.from(document.querySelectorAll(`a[href*="intmId=${intmId}"]`))[0];
+    if (!rowLink) return false;
+    const row = rowLink.closest("tr");
+    if (!row) return false;
+    const downloadLink = Array.from(row.querySelectorAll("a")).find((a) =>
+      /download/i.test(a.textContent) || /download/i.test(a.getAttribute("title") || "")
+    );
+    if (!downloadLink) return false;
+    downloadLink.click();
+    return true;
+  }, intmId);
+
+  if (!clicked) return null;
+
+  // Poll for a new file to land in the download directory.
+  const timeoutMs = 20000;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const after = fs.readdirSync(SEBI_DOWNLOAD_DIR);
+    const newFile = after.find((f) => !before.has(f) && !f.endsWith(".crdownload"));
+    if (newFile) {
+      // Give Chrome a moment to finish flushing the file to disk.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return path.join(SEBI_DOWNLOAD_DIR, newFile);
+    }
+  }
+  return null;
+}
+
+/** Parses whatever file tryDownloadFromHub captured, based on its extension. */
+async function parseSebiDownloadedFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".csv") {
+    const text = fs.readFileSync(filePath, "utf8");
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) return [];
+    const header = lines[0].split(",").map((h) => h.replace(/"/g, "").trim());
+    const nameIdx = header.findIndex((h) => /^name$/i.test(h) || /name/i.test(h));
+    if (nameIdx === -1) return [];
+    return dedupe(
+      lines.slice(1).map((line) => (line.split(",")[nameIdx] || "").replace(/"/g, "").trim()).filter(Boolean)
+    );
+  }
+  if (ext === ".xlsx" || ext === ".xls") {
+    const { names } = await parseXlsxBuffer(fs.readFileSync(filePath));
+    return names;
+  }
+  if (ext === ".pdf") {
+    const parsed = await pdfParse(fs.readFileSync(filePath));
+    return dedupe(namesFromPdfText(parsed.text));
+  }
+  console.warn(`  downloaded file has unrecognised extension (${ext}) - not auto-parsed, check ${filePath} manually.`);
+  return [];
+}
+
+async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage) {
+  // Try the download route first - if SEBI's Download button produces a
+  // genuine full-list file, this is far more reliable than paginating
+  // through potentially hundreds of pages.
+  if (hubPage) {
+    const intmIdMatch = source.url.match(/intmId=(\d+)/);
+    if (intmIdMatch) {
+      try {
+        const downloadedFile = await tryDownloadFromHub(hubPage, intmIdMatch[1]);
+        if (downloadedFile) {
+          const names = await parseSebiDownloadedFile(downloadedFile);
+          if (names.length > 0) {
+            console.log(`  got ${names.length} names via Download button (${path.basename(downloadedFile)})`);
+            if (expectedCount && names.length < expectedCount) {
+              console.warn(`  downloaded file has ${names.length}, expected ${expectedCount} - may itself be incomplete or paginated.`);
+            }
+            return { names };
+          }
+          console.warn(`  downloaded file produced 0 names (${downloadedFile}) - falling back to pagination.`);
+        } else {
+          console.log(`  no file appeared from Download button within timeout - falling back to pagination.`);
+        }
+      } catch (err) {
+        console.warn(`  Download-button attempt failed (${err.message}) - falling back to pagination.`);
+      }
+    }
+  }
+
   await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
 
   let html = await page.content();

@@ -190,6 +190,14 @@ function extractFromTable(html) {
   const $ = cheerio.load(html);
   const names = [];
 
+  // Collect every table's rows first, so a schema learned from one table
+  // (the one with a real header) can be applied to OTHERS that lack their
+  // own header - confirmed by testing that RBI-style bulk lists sometimes
+  // split across multiple <table> elements (print-pagination behaviour),
+  // where only the first repeats the header row. Treating each table in
+  // isolation silently dropped every row in headerless continuation
+  // tables - this was a real, reproduced bug, not a hypothetical one.
+  const tables = [];
   $("table").each((_, tableEl) => {
     const rows = [];
     $(tableEl)
@@ -201,24 +209,48 @@ function extractFromTable(html) {
           .get();
         if (cells.some((c) => c.length > 0)) rows.push(cells);
       });
-    if (rows.length < 2) return;
+    if (rows.length > 0) tables.push(rows);
+  });
+  if (tables.length === 0) return [];
 
+  // Learn the schema (which column index holds the name) from whichever
+  // table has a recognisable header - usually the first, but not assumed.
+  let nameIdx = -1;
+  let learnedColumnCount = null;
+  for (const rows of tables) {
     const headerIdx = rows.findIndex((r) =>
       r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
     );
-    if (headerIdx === -1) return;
+    if (headerIdx !== -1) {
+      const headerRow = rows[headerIdx];
+      const idx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
+      if (idx !== -1) {
+        nameIdx = idx;
+        learnedColumnCount = headerRow.length;
+        break;
+      }
+    }
+  }
+  if (nameIdx === -1) return []; // no table on the page had a usable header at all
 
-    const headerRow = rows[headerIdx];
-    const nameIdx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
-    if (nameIdx === -1) return;
-
-    for (let i = headerIdx + 1; i < rows.length; i++) {
+  // Apply that schema to every table: skip the header row where one
+  // exists, treat every row as data where none does (as long as its
+  // column count roughly matches - guards against accidentally reading
+  // from an unrelated small table elsewhere on the page, like a metadata
+  // box).
+  for (const rows of tables) {
+    const headerIdx = rows.findIndex((r) =>
+      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    );
+    const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
+    for (let i = startRow; i < rows.length; i++) {
+      if (headerIdx === -1 && Math.abs(rows[i].length - learnedColumnCount) > 1) continue; // column-count guard for headerless tables
       const name = (rows[i][nameIdx] || "").trim();
       if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
         names.push(name);
       }
     }
-  });
+  }
 
   return [...new Set(names)];
 }
@@ -231,11 +263,20 @@ function extractFromTable(html) {
  * press releases, not just one or the other.
  */
 function extractFromProseList(plainText) {
-  const chunks = plainText.split(/(?:^|\s)(\d{1,3})\.\s+/).filter(Boolean);
-  const candidates = chunks.filter((c) => !/^\d{1,3}$/.test(c));
+  // Same interleaving fix applied elsewhere in this project: split() with a
+  // capturing group puts the pre-first-match text at index 0, which is
+  // never an entity (it's the lead-in sentence, e.g. "The following
+  // entities:") - this was still being included here even though the
+  // equivalent bug was already fixed in customParsers.js. Confirmed by
+  // testing: "The following entities" was passing through as a fake name.
+  const rawParts = plainText.split(/(?:^|\s)(\d{1,3})\.\s+/);
   const names = [];
-  for (let chunk of candidates) {
-    const cut = chunk.split(/\s{2,}|(?<=Limited|Ltd\.?|Pvt\.?|LLP)\s+(?=[A-Z])/)[0];
+  for (let i = 1; i < rawParts.length; i += 2) {
+    const chunk = rawParts[i + 1];
+    if (!chunk) continue;
+    // Comma-tolerant: "UAE Exchange Centre LLC, UAE Dubai ..." needs the
+    // cut to land after "LLC" even with a comma before the address starts.
+    const cut = chunk.split(/\s{2,}|(?<=Limited|Ltd\.?|Pvt\.?|LLP|LLC|Inc\.?|Corp\.?|Corporation|Co\.|PLC|GmbH|N\.V\.),?\s+(?=[A-Z])/)[0];
     const candidate = (cut || chunk).trim().replace(/[,;:]$/, "");
     if (looksLikeEntityName(candidate)) names.push(candidate);
   }

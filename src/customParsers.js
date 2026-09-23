@@ -31,6 +31,48 @@ import * as cheerio from "cheerio";
 /**
  * @param {string} html - HTML of a SEBI OtherAction.do?doRecognisedFpi=yes&intmId=N page
  */
+/**
+ * Parses SEBI's "Recognised Intermediaries" hub page (doRecognised=yes,
+ * no intmId) into {intmId -> {label, expectedCount}}. This page's own
+ * table reliably shows the TRUE total record count per category (e.g.
+ * "Stock Brokers in equity segment: 4994") - confirmed by direct
+ * inspection. Used as a validation target: a category scrape that falls
+ * short of this number is known-incomplete, not just suspected.
+ */
+export function parseSebiHubCounts(html) {
+  const $ = cheerio.load(html);
+  const counts = new Map();
+  $("table").each((_, tableEl) => {
+    const rows = [];
+    $(tableEl)
+      .find("tr")
+      .each((__, trEl) => {
+        const cells = $(trEl)
+          .find("th,td")
+          .map((___, el) => $(el).text().replace(/\s+/g, " ").trim())
+          .get();
+        const link = $(trEl).find("a[href*='intmId=']").attr("href") || null;
+        if (cells.length > 0) rows.push({ cells, link });
+      });
+    if (rows.length < 2) return;
+
+    const headerIdx = rows.findIndex((r) => r.cells.some((c) => /^count$/i.test(c)));
+    if (headerIdx === -1) return;
+    const countIdx = rows[headerIdx].cells.findIndex((c) => /^count$/i.test(c));
+
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const { cells, link } = rows[i];
+      if (!link) continue;
+      const match = link.match(/intmId=(\d+)/);
+      if (!match) continue;
+      const countText = cells[countIdx];
+      if (!countText || !/^\d+$/.test(countText)) continue;
+      counts.set(match[1], { label: cells[1] || cells[0], expectedCount: parseInt(countText, 10) });
+    }
+  });
+  return counts;
+}
+
 export function parseSebiIntermediaryPage(html) {
   // SEBI's category pages actually use two different templates - confirmed
   // by direct inspection: some (Credit Rating Agency) render as label-value
@@ -229,7 +271,7 @@ export function parseRbiPssSection(html, pssSection) {
   for (let i = 1; i < rawParts.length; i += 2) {
     const chunk = rawParts[i + 1];
     if (!chunk) continue;
-    const cut = chunk.split(/\s{2,}|(?<=Limited|Ltd\.?|Pvt\.?|LLP)\s+(?=[A-Z])/)[0];
+    const cut = chunk.split(/\s{2,}|(?<=Limited|Ltd\.?|Pvt\.?|LLP|LLC|Inc\.?|Corp\.?|Corporation|Co\.|PLC|GmbH|N\.V\.),?\s+(?=[A-Z])/)[0];
     const candidate = (cut || chunk).trim().replace(/[,;:]$/, "");
     if (looksLikeEntityName(candidate)) names.push(candidate);
   }

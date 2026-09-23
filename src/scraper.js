@@ -25,7 +25,7 @@ import { writeWorkbook } from "./excelWriter.js";
 import { fetchNbfcStatusDeltas } from "./pressReleases.js";
 import { fetchNbfcStatusDeltasFromArchive } from "./pressReleaseArchive.js";
 import { mergeStatuses, extractMasterListDate } from "./statusMerge.js";
-import { parseRbiBanksSection, parseRbiPssSection, parseSebiIntermediaryPage } from "./customParsers.js";
+import { parseRbiBanksSection, parseRbiPssSection, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
 import { getRank } from "./priorityMatrix.js";
 
 const OUTPUT_DIR = path.resolve("output");
@@ -228,6 +228,17 @@ async function parseXlsxBuffer(buffer, { captureClassification = false } = {}) {
       titleText = allRows[0].filter(Boolean).join(" ");
     }
 
+    // ARCs (Asset Reconstruction Companies) are NOT one of the values
+    // RBI's own "Classification" column uses (that column only carries
+    // NBFC sub-types: ICC/CIC/MFI/P2P/etc). RBI's own document format
+    // confirms ARCs are reported as an entirely separate section/count
+    // ("Furthermore, there were 27 ARCs registered...") rather than a
+    // classification value - so a sheet/section actually dedicated to ARCs
+    // needs to be detected by its own name/title, not by a column that
+    // simply doesn't carry this information for these entities.
+    const sheetIsArcSection = /\bARC\b|Asset Reconstruction/i.test(ws.name || "") ||
+      /\bARC\b|Asset Reconstruction/i.test(allRows[0]?.filter(Boolean).join(" ") || "");
+
     const headerRow = allRows[headerIdx];
     const nameIdx = guessNameColumnIndex(headerRow);
     const classificationIdx = captureClassification
@@ -242,7 +253,9 @@ async function parseXlsxBuffer(buffer, { captureClassification = false } = {}) {
         name.length <= MAX_PLAUSIBLE_NAME_LENGTH
       ) {
         names.push(name);
-        if (classificationIdx !== -1) {
+        if (sheetIsArcSection) {
+          classifications.set(name, "ARC");
+        } else if (classificationIdx !== -1) {
           const classification = (allRows[i][classificationIdx] || "").trim();
           if (classification) classifications.set(name, classification);
         }
@@ -355,6 +368,22 @@ async function run() {
   let masterListTitleText = null;
   let statusReconciliation = null;
 
+  // Fetch SEBI's real per-category record counts once up front, used as
+  // the target the pagination walker below aims for - see
+  // scrapeSebiIntermediaryCustom for why this matters (previous runs
+  // silently capped at ~25 records per category with no way to tell).
+  let sebiHubCounts = new Map();
+  try {
+    const { data: hubHtml } = await axios.get(
+      "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognised=yes",
+      { headers: { "User-Agent": USER_AGENT }, timeout: 30000 }
+    );
+    sebiHubCounts = parseSebiHubCounts(hubHtml);
+    console.log(`Fetched SEBI hub counts for ${sebiHubCounts.size} categories`);
+  } catch (err) {
+    console.warn(`Could not fetch SEBI hub counts (${err.message}) - SEBI sources will run without a target count.`);
+  }
+
   try {
     for (const source of sources) {
       console.log(`Scraping [${source.key}] ${source.url}`);
@@ -379,7 +408,17 @@ async function run() {
         } else if (source.type === "rbi_pss_custom") {
           ({ names } = await scrapeRbiPssCustom(source, browser));
         } else if (source.type === "sebi_intermediary_custom") {
-          ({ names } = await scrapeSebiIntermediaryCustom(source, browser));
+          {
+            const sebiPage = await browser.newPage();
+            await sebiPage.setUserAgent(USER_AGENT);
+            try {
+              const intmIdMatch = source.url.match(/intmId=(\d+)/);
+              const expectedCount = intmIdMatch ? sebiHubCounts.get(intmIdMatch[1])?.expectedCount : null;
+              ({ names } = await scrapeSebiIntermediaryCustom(source, sebiPage, expectedCount));
+            } finally {
+              await sebiPage.close();
+            }
+          }
         } else if (source.type === "manual") {
           status = "skipped_manual";
         } else {
@@ -593,73 +632,90 @@ async function scrapeRbiPssCustom(source, browser) {
  * extracted count BEFORE and AFTER the click attempt and logs a clear
  * diagnostic either way, so the next run's logs settle definitively
  * whether this is working - no more guessing from row counts alone. */
-async function scrapeSebiIntermediaryCustom(source, browser) {
-  const page = await browser.newPage();
-  await page.setUserAgent(USER_AGENT);
-  try {
-    await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
+/**
+ * Walks SEBI's real pagination page-by-page, accumulating names, rather
+ * than betting on a single "Show All Records" click - a related SEBI-site
+ * scraping attempt found that direct export endpoints couldn't be verified
+ * reliably outside a real browser session either, so this follows the
+ * same safer, proven path of paging through the actual HTML.
+ *
+ * Stops when: the accumulated count reaches expectedCount (from the hub
+ * page - the authoritative target), OR no "next page" control can be
+ * found, OR a page produces no new names (protects against an infinite
+ * loop if a "next" link exists but doesn't actually advance), OR a safety
+ * cap of iterations is hit.
+ *
+ * HONESTY NOTE: the exact next-page click target (numbered link vs "Next"
+ * text vs something else) is unverified from my sandbox - this tries
+ * several common patterns generically. Expect this to need tuning against
+ * the real live page, same as every other custom parser in this project.
+ */
+async function scrapeSebiIntermediaryCustom(source, page, expectedCount) {
+  await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
 
-    const beforeHtml = await page.content();
-    const beforeCount = parseSebiIntermediaryPage(beforeHtml).names.length;
+  let html = await page.content();
+  let { names, note } = parseSebiIntermediaryPage(html);
+  if (note) console.warn(`  ${note}`);
+  let allNames = new Set(names);
 
-    const hasShowAllLink = await page.evaluate(() => {
-      return !!Array.from(document.querySelectorAll("a")).find(
-        (a) => /show all records/i.test(a.textContent) || /searchAllIntm/.test(a.getAttribute("onclick") || "")
-      );
-    });
+  const target = expectedCount || null;
+  if (target) console.log(`  target from hub page: ${target} records`);
 
-    if (hasShowAllLink) {
-      try {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => null),
-          page.evaluate(() => {
-            const link = Array.from(document.querySelectorAll("a")).find(
-              (a) => /show all records/i.test(a.textContent) || /searchAllIntm/.test(a.getAttribute("onclick") || "")
-            );
-            // Prefer invoking the underlying function directly if we can
-            // parse it out of the onclick attribute - more reliable than
-            // .click() for javascript:-style links, which some browsers /
-            // headless setups handle inconsistently.
-            const onclick = link && link.getAttribute("onclick");
-            const fnMatch = onclick && onclick.match(/([a-zA-Z_]+\([^)]*\))/);
-            if (fnMatch && typeof window[fnMatch[1].split("(")[0]] === "function") {
-              window[fnMatch[1].split("(")[0]]();
-            } else if (link) {
-              link.click();
-            }
-          }),
-        ]);
-      } catch {
-        // Navigation-based approach failed - not necessarily fatal, the
-        // click may still have triggered an AJAX update instead of a full
-        // page reload. Fall through to the network-idle wait below.
+  const MAX_PAGES = 260; // covers the largest known category (~4994 / 25 ≈ 200 pages) with headroom
+  let pageNum = 1;
+
+  while (!target || allNames.size < target) {
+    if (pageNum >= MAX_PAGES) {
+      console.warn(`  hit safety cap of ${MAX_PAGES} pages - stopping early`);
+      break;
+    }
+
+    const nextClicked = await page.evaluate((currentPageNum) => {
+      const nextPageLabel = String(currentPageNum + 1);
+      const candidates = Array.from(document.querySelectorAll("a"));
+      // Try, in order: a link literally labeled with the next page number,
+      // then a "Next"/"»" style link. Whichever exists first wins.
+      const numbered = candidates.find((a) => a.textContent.trim() === nextPageLabel);
+      const nextLink = candidates.find((a) => /^(next|»|>>|>)$/i.test(a.textContent.trim()));
+      const target = numbered || nextLink;
+      if (target) {
+        target.click();
+        return true;
       }
-      await page.waitForNetworkIdle({ idleTime: 1000, timeout: 20000 }).catch(() => {});
-      // Extra fixed delay as a last-resort safety net - some gov sites are
-      // slow enough that networkidle fires before content actually swaps in.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return false;
+    }, pageNum);
+
+    if (!nextClicked) {
+      console.log(`  no further page-${pageNum + 1} control found - stopping (got ${allNames.size} of ${target || "unknown"})`);
+      break;
     }
 
-    const afterHtml = await page.content();
-    const { names, note } = parseSebiIntermediaryPage(afterHtml);
-    if (note) console.warn(`  ${note}`);
+    await page.waitForNetworkIdle({ idleTime: 800, timeout: 15000 }).catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-    if (!hasShowAllLink) {
-      console.log(`  (no 'Show All Records' link found - category likely small enough to fit one page)`);
-    } else if (names.length <= beforeCount) {
-      console.warn(
-        `  WARNING: 'Show All Records' click did not increase the row count ` +
-          `(before: ${beforeCount}, after: ${names.length}) - the click is likely ` +
-          `not taking effect. This source's data may be incomplete (page-1-only).`
-      );
-    } else {
-      console.log(`  'Show All Records' click worked: ${beforeCount} -> ${names.length} rows`);
+    html = await page.content();
+    const result = parseSebiIntermediaryPage(html);
+    const before = allNames.size;
+    for (const n of result.names) allNames.add(n);
+
+    if (allNames.size === before) {
+      console.warn(`  page ${pageNum + 1} produced no new names - stopping to avoid an infinite loop`);
+      break;
     }
 
-    return { names };
-  } finally {
-    await page.close();
+    pageNum++;
   }
+
+  const finalNames = [...allNames];
+  if (target && finalNames.length < target) {
+    console.warn(
+      `  WARNING: only got ${finalNames.length} of ${target} expected records for ${source.key} - incomplete, needs investigation.`
+    );
+  } else if (target) {
+    console.log(`  reached full expected count: ${finalNames.length}/${target}`);
+  }
+
+  return { names: finalNames };
 }
 
 /**

@@ -215,8 +215,43 @@ export const sources = [
     categoryAsPerRegulator: "State Co-operative Banks",
     regulator: "RBI",
     url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
+    fileUrl: "https://rbidocs.rbi.org.in/rdocs/Content/pdfs/SCCB20141702.pdf",
+    type: "pdf_link",
+    notes:
+      "The BanksInIndia.aspx page itself has no clean per-entity list for " +
+      "this (confirmed - it's name+address prose per state). Found this " +
+      "direct RBI PDF (26 Scheduled State Co-operative Banks) via search " +
+      "instead. PDF text extraction may mix address lines into names - " +
+      "verify manually against the source PDF.",
+  },
+  {
+    key: "rbi_bank_scheduled_urban_coop",
+    categoryAsPerReturn: "Banks",
+    categoryAsPerRegulator: "Scheduled Urban Co-operative Banks",
+    regulator: "RBI",
+    url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
+    fileUrl: "https://www.rbi.org.in/commonman/upload/English/Content/pdfs/schedulecoop.pdf",
+    type: "pdf_link",
+    notes: "Found via search - direct RBI PDF of Scheduled Urban Co-operative Banks. Same PDF-extraction caveat as rbi_bank_state_coop.",
+  },
+  {
+    key: "rbi_bank_non_scheduled_urban_coop",
+    categoryAsPerReturn: "Banks",
+    categoryAsPerRegulator: "Non-Scheduled Urban Co-operative Banks",
+    regulator: "RBI",
+    url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
+    fileUrl: "https://rbidocs.rbi.org.in/rdocs/Content/pdfs/nonschedulecoop.pdf",
+    type: "pdf_link",
+    notes: "Found via search - a plausible match for Non-Scheduled Urban Co-op Banks based on its content (urban bank names/addresses), but the filename itself doesn't explicitly confirm Urban vs State scope - verify against the PDF directly.",
+  },
+  {
+    key: "rbi_bank_non_scheduled_state_coop",
+    categoryAsPerReturn: "Banks",
+    categoryAsPerRegulator: "Non-Scheduled State Co-operative Banks",
+    regulator: "RBI",
+    url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
     type: "manual",
-    notes: "Page section is name+address prose per state, not a clean per-entity list - see rbi_banks_custom limitations in scraper.js.",
+    notes: "Could not find a distinct, confirmed real source specifically for this sub-category (separate from the Non-Scheduled Urban PDF above) - flagged rather than guessed.",
   },
 
   {

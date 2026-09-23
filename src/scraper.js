@@ -20,6 +20,7 @@ import * as cheerio from "cheerio";
 import puppeteer from "puppeteer";
 import pdfParse from "pdf-parse";
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { sources } from "./sources.js";
 import { writeWorkbook } from "./excelWriter.js";
 import { fetchNbfcStatusDeltas } from "./pressReleases.js";
@@ -776,12 +777,28 @@ async function parseSebiDownloadedFile(filePath) {
   }
 
   if (isOldBinaryXls) {
-    console.warn(
-      `  downloaded file is an old binary .xls (not OOXML) - this project's xlsx parser (ExcelJS) can't ` +
-        `read that format. Would need the 'xlsx' (SheetJS) package added as a dependency to support it. ` +
-        `File left at ${filePath} for manual inspection.`
-    );
-    return [];
+    // Confirmed by a real run: SEBI's "Excel export" produces genuine old
+    // BIFF8 .xls files (magic bytes d0cf11e0), which ExcelJS (this
+    // project's main xlsx parser, used for RBI's files) can't read - it
+    // only supports the newer zip-based OOXML .xlsx format. SheetJS
+    // handles both, so it's used here specifically for this case.
+    console.log(`  downloaded file is old binary .xls - parsing with SheetJS.`);
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const names = [];
+    for (const sheetName of wb.SheetNames) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
+      const nonEmptyRows = rows.map((r) => r.map((c) => String(c ?? "").trim())).filter((r) => r.some(Boolean));
+      const headerIdx = findHeaderRowIndex(nonEmptyRows);
+      if (headerIdx === -1) continue;
+      const nameIdx = guessNameColumnIndex(nonEmptyRows[headerIdx]);
+      for (let i = headerIdx + 1; i < nonEmptyRows.length; i++) {
+        const name = (nonEmptyRows[i][nameIdx] || "").trim();
+        if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
+          names.push(name);
+        }
+      }
+    }
+    return dedupe(names);
   }
 
   // CSV as a last resort, since it has no reliable magic-byte signature -

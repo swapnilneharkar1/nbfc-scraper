@@ -726,9 +726,69 @@ async function tryDownloadFromHub(hubPage, intmId) {
 
 /** Parses whatever file tryDownloadFromHub captured, based on its extension. */
 async function parseSebiDownloadedFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".csv") {
-    const text = fs.readFileSync(filePath, "utf8");
+  const buffer = fs.readFileSync(filePath);
+  const head = buffer.slice(0, 1024).toString("utf8", 0, Math.min(1024, buffer.length));
+  const headBytes = buffer.slice(0, 8);
+
+  // Content-sniff rather than trust the file extension - confirmed
+  // necessary: a real run's "Excel export" file failed to parse as a real
+  // zip-based .xlsx ("Can't find end of central directory"), which is the
+  // classic signature of a legacy government-site pattern: the "export"
+  // button just serves an HTML table with a misleading .xls/.xlsx
+  // extension (Excel opens these fine via permissive format-sniffing, but
+  // they are not real spreadsheet files at all).
+  const isZipXlsx = headBytes[0] === 0x50 && headBytes[1] === 0x4b; // "PK" zip signature
+  const isOldBinaryXls =
+    headBytes[0] === 0xd0 && headBytes[1] === 0xcf && headBytes[2] === 0x11 && headBytes[3] === 0xe0;
+  const looksLikeHtml = /<html|<table|<!doctype html/i.test(head);
+
+  if (looksLikeHtml) {
+    console.log(`  downloaded file is HTML-disguised-as-Excel (common legacy pattern) - parsing as a table.`);
+    const $ = cheerio.load(buffer.toString("utf8"));
+    const names = [];
+    $("table").each((_, tableEl) => {
+      const rows = [];
+      $(tableEl)
+        .find("tr")
+        .each((__, trEl) => {
+          const cells = $(trEl)
+            .find("th,td")
+            .map((___, cellEl) => $(cellEl).text().replace(/\s+/g, " ").trim())
+            .get();
+          if (cells.some((c) => c.length > 0)) rows.push(cells);
+        });
+      if (rows.length < 2) return;
+      const headerIdx = rows.findIndex((r) => r.some((cell) => /^name$/i.test(cell) || /^name\b/i.test(cell)));
+      if (headerIdx === -1) return;
+      const nameIdx = rows[headerIdx].findIndex((h) => /^name$/i.test(h) || /^name\b/i.test(h));
+      if (nameIdx === -1) return;
+      for (let i = headerIdx + 1; i < rows.length; i++) {
+        const name = (rows[i][nameIdx] || "").trim();
+        if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 150) names.push(name);
+      }
+    });
+    return [...new Set(names)];
+  }
+
+  if (isZipXlsx) {
+    const { names } = await parseXlsxBuffer(buffer, { captureClassification: false });
+    return names;
+  }
+
+  if (isOldBinaryXls) {
+    console.warn(
+      `  downloaded file is an old binary .xls (not OOXML) - this project's xlsx parser (ExcelJS) can't ` +
+        `read that format. Would need the 'xlsx' (SheetJS) package added as a dependency to support it. ` +
+        `File left at ${filePath} for manual inspection.`
+    );
+    return [];
+  }
+
+  // CSV as a last resort, since it has no reliable magic-byte signature -
+  // only try it if the content looks like delimited text, not binary noise.
+  const looksLikeCsv = /^[\x09\x0A\x0D\x20-\x7E,"]+$/.test(head.slice(0, 200));
+  if (looksLikeCsv) {
+    const text = buffer.toString("utf8");
     const lines = text.split(/\r?\n/).filter(Boolean);
     if (lines.length < 2) return [];
     const header = lines[0].split(",").map((h) => h.replace(/"/g, "").trim());
@@ -738,15 +798,14 @@ async function parseSebiDownloadedFile(filePath) {
       lines.slice(1).map((line) => (line.split(",")[nameIdx] || "").replace(/"/g, "").trim()).filter(Boolean)
     );
   }
-  if (ext === ".xlsx" || ext === ".xls") {
-    const { names } = await parseXlsxBuffer(fs.readFileSync(filePath));
-    return names;
-  }
-  if (ext === ".pdf") {
-    const parsed = await pdfParse(fs.readFileSync(filePath));
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".pdf" || head.startsWith("%PDF")) {
+    const parsed = await pdfParse(buffer);
     return dedupe(namesFromPdfText(parsed.text));
   }
-  console.warn(`  downloaded file has unrecognised extension (${ext}) - not auto-parsed, check ${filePath} manually.`);
+
+  console.warn(`  downloaded file's content didn't match any known format (checked zip/xlsx, old .xls, HTML, CSV, PDF) - not auto-parsed, check ${filePath} manually.`);
   return [];
 }
 

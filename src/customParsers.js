@@ -32,6 +32,15 @@ import * as cheerio from "cheerio";
  * @param {string} html - HTML of a SEBI OtherAction.do?doRecognisedFpi=yes&intmId=N page
  */
 export function parseSebiIntermediaryPage(html) {
+  // SEBI's category pages actually use two different templates - confirmed
+  // by direct inspection: some (Credit Rating Agency) render as label-value
+  // blocks; others (e.g. broker/bank-style listings) render as a real
+  // <table> with a "Sr. No. | Name | ..." header. Try the table format
+  // first since it's the more common/structured one, fall back to the
+  // label-value regex otherwise.
+  const fromTable = extractSebiTable(html);
+  if (fromTable.length > 0) return { names: fromTable, note: null };
+
   const $ = cheerio.load(html);
   const text = $.root().text().replace(/[ \t]+/g, " ").replace(/\n+/g, "\n").trim();
 
@@ -43,7 +52,37 @@ export function parseSebiIntermediaryPage(html) {
     .map((m) => m[1].trim())
     .filter((name) => name.length >= 3 && name.length <= 150 && !/^\d+$/.test(name));
 
-  return { names: [...new Set(names)], note: names.length === 0 ? "No Name/Registration No. pairs found - SEBI may have changed this page's layout." : null };
+  return { names: [...new Set(names)], note: names.length === 0 ? "No table and no Name/Registration No. pairs found - SEBI may have changed this page's layout." : null };
+}
+
+function extractSebiTable(html) {
+  const $ = cheerio.load(html);
+  const names = [];
+  $("table").each((_, tableEl) => {
+    const rows = [];
+    $(tableEl)
+      .find("tr")
+      .each((__, trEl) => {
+        const cells = $(trEl)
+          .find("th,td")
+          .map((___, cellEl) => $(cellEl).text().replace(/\s+/g, " ").trim())
+          .get();
+        if (cells.some((c) => c.length > 0)) rows.push(cells);
+      });
+    if (rows.length < 2) return;
+    const headerIdx = rows.findIndex((r) => r.some((cell) => /^name$/i.test(cell) || /^name\b/i.test(cell)));
+    if (headerIdx === -1) return;
+    const headerRow = rows[headerIdx];
+    const nameIdx = headerRow.findIndex((h) => /^name$/i.test(h) || /^name\b/i.test(h));
+    if (nameIdx === -1) return;
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const name = (rows[i][nameIdx] || "").trim();
+      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 150) {
+        names.push(name);
+      }
+    }
+  });
+  return [...new Set(names)];
 }
 
 // ---------------------------------------------------------------------

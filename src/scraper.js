@@ -379,7 +379,7 @@ async function run() {
         } else if (source.type === "rbi_pss_custom") {
           ({ names } = await scrapeRbiPssCustom(source, browser));
         } else if (source.type === "sebi_intermediary_custom") {
-          ({ names } = await scrapeSebiIntermediaryCustom(source));
+          ({ names } = await scrapeSebiIntermediaryCustom(source, browser));
         } else if (source.type === "manual") {
           status = "skipped_manual";
         } else {
@@ -568,14 +568,44 @@ async function scrapeRbiPssCustom(source, browser) {
  * pages are plain server-rendered HTML (a simple fetch sees full content),
  * so - unlike the RBI Banks/PSS pages - this doesn't need Puppeteer at all,
  * just a different parser than the generic table extractor. */
-async function scrapeSebiIntermediaryCustom(source) {
-  const { data: html } = await axios.get(source.url, {
-    headers: { "User-Agent": USER_AGENT },
-    timeout: 30000,
-  });
-  const { names, note } = parseSebiIntermediaryPage(html);
-  if (note) console.warn(`  ${note}`);
-  return { names };
+/** Confirmed by direct inspection: SEBI's category pages paginate at 25
+ * records per page for larger categories (e.g. "1 to 25 of 57 records"),
+ * which a plain HTTP fetch only ever sees page 1 of - this was the actual
+ * cause of "not all considered" across most SEBI categories, not a
+ * rendering issue. There is a "Show All Records" link
+ * (onclick="javascript: searchAllIntm();") that bypasses pagination
+ * entirely - Puppeteer clicks it before reading the page. Categories small
+ * enough to never paginate (like Credit Rating Agency) simply won't have
+ * this link, which is handled gracefully (click attempt just no-ops). */
+async function scrapeSebiIntermediaryCustom(source, browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  try {
+    await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
+
+    const clicked = await page.evaluate(() => {
+      const link = Array.from(document.querySelectorAll("a")).find(
+        (a) => /show all records/i.test(a.textContent) || /searchAllIntm/.test(a.getAttribute("onclick") || "")
+      );
+      if (link) {
+        link.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (clicked) {
+      await page.waitForNetworkIdle({ idleTime: 800, timeout: 20000 }).catch(() => {});
+    }
+
+    const html = await page.content();
+    const { names, note } = parseSebiIntermediaryPage(html);
+    if (note) console.warn(`  ${note}`);
+    if (!clicked) console.log(`  (no 'Show All Records' link found - category likely small enough to fit one page)`);
+    return { names };
+  } finally {
+    await page.close();
+  }
 }
 
 /**

@@ -303,6 +303,26 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
           ? entryDate.toISOString().slice(0, 10)
           : `${year}-${String(MONTH_NAMES.indexOf(month) + 1).padStart(2, "0")}-01`;
 
+        // RBI's own bulk-notice titles state the expected count (e.g. "...
+        // of 59 NBFCs"), which gives a free, cheap sanity check on whether
+        // extraction actually got everything. A mismatch here doesn't
+        // pinpoint the exact cause, but it stops an under-extraction from
+        // silently passing as if it were complete - flagged directly on
+        // every row from this release so it's visible in the output sheet,
+        // not just a console log that scrolls by during the Actions run.
+        const titleCountMatch = entry.title.match(
+          /\b(\d+)\s+NBFCs?\b|of\s+(\d+)\s+NBFCs?\b/i
+        );
+        const expectedCount = titleCountMatch
+          ? parseInt(titleCountMatch[1] || titleCountMatch[2], 10)
+          : null;
+        const countMismatch =
+          expectedCount !== null && names.length > 0 && names.length !== expectedCount;
+        const countNote = countMismatch
+          ? `Title states ${expectedCount} entities but only ${names.length} were extracted - likely incomplete, verify against the source press release.`
+          : null;
+        if (countMismatch) monthNotes.push(`Count mismatch on "${entry.title}": expected ${expectedCount}, got ${names.length}`);
+
         if (names.length === 0) {
           deltas.push({
             entityName: null,
@@ -322,7 +342,7 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
               prTitle: entry.title,
               prLink: entry.link,
               needsVerification: true,
-              note: null,
+              note: countNote,
             });
           }
         }

@@ -81,6 +81,7 @@ export function mergeStatuses(masterEntries, deltas) {
         effectiveDate: delta.effectiveDate,
         prTitle: delta.prTitle,
         prLink: delta.prLink,
+        note: delta.note || null,
       });
     } else {
       // Entity mentioned in a press release but not found in the master

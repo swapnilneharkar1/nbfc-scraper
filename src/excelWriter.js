@@ -133,19 +133,29 @@ function writeStatusChangeLogSheet(wb, { merged, unattributedDeltas }) {
     { header: "Press Release", key: "prTitle", width: 55 },
     { header: "Link", key: "prLink", width: 60 },
     { header: "Needs Manual Verification", key: "flag", width: 24 },
+    { header: "Note", key: "note", width: 60 },
   ];
   sheet.getRow(1).font = { bold: true };
 
   for (const m of merged) {
     for (const h of m.statusHistory) {
-      sheet.addRow({
+      const row = sheet.addRow({
         name: m.name,
         action: h.status,
         effectiveDate: h.effectiveDate,
         prTitle: h.prTitle,
         prLink: h.prLink,
         flag: "Yes - verify against source press release",
+        note: h.note || "",
       });
+      // Count-mismatch notes (e.g. "title states 59, only 36 extracted")
+      // get a strong visual flag - this is the single most actionable
+      // signal that a specific release's extraction is known-incomplete.
+      if (h.note) {
+        row.eachCell((cell) => {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFCE4E4" } };
+        });
+      }
     }
   }
   for (const d of unattributedDeltas) {
@@ -156,9 +166,10 @@ function writeStatusChangeLogSheet(wb, { merged, unattributedDeltas }) {
       prTitle: d.prTitle,
       prLink: d.prLink,
       flag: "Yes - names not extracted automatically",
+      note: "",
     });
   }
-  sheet.autoFilter = { from: "A1", to: "F1" };
+  sheet.autoFilter = { from: "A1", to: "G1" };
 }
 
 /** Entities mentioned in a press release status-change but not found in the

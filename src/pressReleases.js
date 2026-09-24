@@ -136,7 +136,9 @@ function extractFromTable(html) {
 
   let nameIdx = -1;
   let learnedColumnCount = null;
-  for (const rows of tables) {
+  let headerTableIdx = -1;
+  for (let t = 0; t < tables.length; t++) {
+    const rows = tables[t];
     const headerIdx = rows.findIndex((r) =>
       r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
     );
@@ -146,19 +148,35 @@ function extractFromTable(html) {
       if (idx !== -1) {
         nameIdx = idx;
         learnedColumnCount = headerRow.length;
+        headerTableIdx = t;
         break;
       }
     }
   }
   if (nameIdx === -1) return [];
 
-  for (const rows of tables) {
-    const headerIdx = rows.findIndex((r) =>
-      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
-    );
+  // Tightened guard (same reasoning as pressReleaseArchive.js): a real run
+  // showed the previous ±1 column-count tolerance was too loose and swept
+  // in unrelated tables elsewhere on the page (e.g. 119 names extracted
+  // from a page whose title stated 59 - almost exactly double). Now
+  // requires an EXACT column-count match AND a genuine numeric serial-
+  // number first column before treating a headerless table as a
+  // continuation of the entity list.
+  for (let t = 0; t < tables.length; t++) {
+    const rows = tables[t];
+    const isHeaderTable = t === headerTableIdx;
+    const headerIdx = isHeaderTable
+      ? rows.findIndex((r) => r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell)))
+      : -1;
+
+    if (!isHeaderTable) {
+      const columnCountMatches = rows.every((r) => r.length === learnedColumnCount);
+      const looksLikeSerialColumn = rows.every((r) => /^\d{1,4}$/.test((r[0] || "").trim()));
+      if (!columnCountMatches || !looksLikeSerialColumn) continue;
+    }
+
     const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
     for (let i = startRow; i < rows.length; i++) {
-      if (headerIdx === -1 && Math.abs(rows[i].length - learnedColumnCount) > 1) continue;
       const name = (rows[i][nameIdx] || "").trim();
       if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
         names.push(name);

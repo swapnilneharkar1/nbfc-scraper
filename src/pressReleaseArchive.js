@@ -190,13 +190,6 @@ function extractFromTable(html) {
   const $ = cheerio.load(html);
   const names = [];
 
-  // Collect every table's rows first, so a schema learned from one table
-  // (the one with a real header) can be applied to OTHERS that lack their
-  // own header - confirmed by testing that RBI-style bulk lists sometimes
-  // split across multiple <table> elements (print-pagination behaviour),
-  // where only the first repeats the header row. Treating each table in
-  // isolation silently dropped every row in headerless continuation
-  // tables - this was a real, reproduced bug, not a hypothetical one.
   const tables = [];
   $("table").each((_, tableEl) => {
     const rows = [];
@@ -212,12 +205,15 @@ function extractFromTable(html) {
     if (rows.length > 0) tables.push(rows);
   });
   if (tables.length === 0) return [];
+  console.log(`    (found ${tables.length} <table> element(s) on the page)`);
 
   // Learn the schema (which column index holds the name) from whichever
-  // table has a recognisable header - usually the first, but not assumed.
+  // table has a recognisable header.
   let nameIdx = -1;
   let learnedColumnCount = null;
-  for (const rows of tables) {
+  let headerTableIdx = -1;
+  for (let t = 0; t < tables.length; t++) {
+    const rows = tables[t];
     const headerIdx = rows.findIndex((r) =>
       r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
     );
@@ -227,24 +223,42 @@ function extractFromTable(html) {
       if (idx !== -1) {
         nameIdx = idx;
         learnedColumnCount = headerRow.length;
+        headerTableIdx = t;
         break;
       }
     }
   }
   if (nameIdx === -1) return []; // no table on the page had a usable header at all
 
-  // Apply that schema to every table: skip the header row where one
-  // exists, treat every row as data where none does (as long as its
-  // column count roughly matches - guards against accidentally reading
-  // from an unrelated small table elsewhere on the page, like a metadata
-  // box).
-  for (const rows of tables) {
-    const headerIdx = rows.findIndex((r) =>
-      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
-    );
+  // Real entity table rows start with a running serial number (RBI's
+  // format: "Sr. No. | Name of the Company | ..."). A headerless table is
+  // only treated as a genuine continuation of the SAME list if (a) its
+  // column count matches EXACTLY (tightened from a previous ±1 tolerance
+  // that proved too loose - confirmed by a real run massively
+  // over-extracting, e.g. 119 names from a page stating 59, almost exactly
+  // double - strongly suggesting an unrelated table on the same page, like
+  // a "related links" or print-layout box, was being swept in), AND (b)
+  // its first cell is actually numeric on every row, which unrelated page
+  // furniture (nav/sidebar/metadata tables) essentially never is.
+  for (let t = 0; t < tables.length; t++) {
+    const rows = tables[t];
+    const isHeaderTable = t === headerTableIdx;
+    const headerIdx = isHeaderTable
+      ? rows.findIndex((r) => r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell)))
+      : -1;
+
+    if (!isHeaderTable) {
+      const columnCountMatches = rows.every((r) => r.length === learnedColumnCount);
+      const looksLikeSerialColumn = rows.every((r) => /^\d{1,4}$/.test((r[0] || "").trim()));
+      if (!columnCountMatches || !looksLikeSerialColumn) {
+        console.log(`    (skipping headerless table ${t + 1}/${tables.length} - doesn't look like a continuation of the entity list)`);
+        continue;
+      }
+      console.log(`    (treating headerless table ${t + 1}/${tables.length} as a continuation - column count and serial-number column both match)`);
+    }
+
     const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
     for (let i = startRow; i < rows.length; i++) {
-      if (headerIdx === -1 && Math.abs(rows[i].length - learnedColumnCount) > 1) continue; // column-count guard for headerless tables
       const name = (rows[i][nameIdx] || "").trim();
       if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
         names.push(name);

@@ -160,6 +160,36 @@ function extractFromTable(html) {
   }
   if (nameIdx === -1) return [];
 
+  // VALIDATE the learned column, same fix as pressReleaseArchive.js: a
+  // real run showed this positional approach landing on the serial-number
+  // column instead of the name column. Self-correct by checking whether
+  // the chosen column's data actually looks like text.
+  {
+    const headerRows = tables[headerTableIdx];
+    const headerIdxForValidation = headerRows.findIndex((r) =>
+      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    );
+    const sampleRows = headerRows.slice(headerIdxForValidation + 1, headerIdxForValidation + 6);
+    const chosenColumnLooksNumeric =
+      sampleRows.length > 0 && sampleRows.every((r) => /^\d{1,4}$/.test((r[nameIdx] || "").trim()));
+    if (chosenColumnLooksNumeric) {
+      const columnCount = Math.max(...sampleRows.map((r) => r.length));
+      let corrected = -1;
+      for (let c = 0; c < columnCount; c++) {
+        const looksLikeText = sampleRows.every((r) => {
+          const v = (r[c] || "").trim();
+          return v.length >= 3 && /[A-Za-z]{3,}/.test(v);
+        });
+        if (looksLikeText) {
+          corrected = c;
+          break;
+        }
+      }
+      if (corrected !== -1) nameIdx = corrected;
+      else return [];
+    }
+  }
+
   // Tightened guard (same reasoning as pressReleaseArchive.js): a real run
   // showed the previous ±1 column-count tolerance was too loose and swept
   // in unrelated tables elsewhere on the page (e.g. 119 names extracted
@@ -183,7 +213,8 @@ function extractFromTable(html) {
     const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
     for (let i = startRow; i < rows.length; i++) {
       const name = (rows[i][nameIdx] || "").trim();
-      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
+      const isHeaderLikeText = /^(sl\.?\s*no\.?|s\.?\s*no\.?|sr\.?\s*no\.?|name(\s+of\s+the\s+compan(y|ies))?)$/i.test(name);
+      if (name && !isHeaderLikeText && name.length <= 180) {
         names.push(name);
       }
     }

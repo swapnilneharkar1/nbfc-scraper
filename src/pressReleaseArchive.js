@@ -239,7 +239,51 @@ function extractFromTable(html) {
       }
     }
   }
-  if (nameIdx === -1) return []; // no table on the page had a usable header at all
+  if (nameIdx === -1) return [];
+
+  // VALIDATE, don't just trust, the learned column index. Confirmed by a
+  // real run: this positional approach can land on the serial-number
+  // column instead of the name column (extracted "names" were literally
+  // ["Sr. No.", "1", "2", ...]) - almost certainly because RBI's header
+  // row uses a merged/colspan cell that doesn't align 1:1 with the data
+  // rows' actual column positions. Rather than assume why, directly check
+  // whether the chosen column's data looks like real names (contains
+  // letters) or looks like a serial column (pure digits) and self-correct
+  // by scanning for the first column that actually looks like text.
+  {
+    const headerRows = tables[headerTableIdx];
+    const headerIdx = headerRows.findIndex((r) =>
+      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    );
+    const sampleRows = headerRows.slice(headerIdx + 1, headerIdx + 6);
+    const chosenColumnLooksNumeric =
+      sampleRows.length > 0 && sampleRows.every((r) => /^\d{1,4}$/.test((r[nameIdx] || "").trim()));
+
+    if (chosenColumnLooksNumeric) {
+      console.warn(
+        `    learned name column (index ${nameIdx}) looks like a serial-number column, not names - searching for the real name column instead.`
+      );
+      const columnCount = Math.max(...sampleRows.map((r) => r.length));
+      let corrected = -1;
+      for (let c = 0; c < columnCount; c++) {
+        const looksLikeText = sampleRows.every((r) => {
+          const v = (r[c] || "").trim();
+          return v.length >= 3 && /[A-Za-z]{3,}/.test(v);
+        });
+        if (looksLikeText) {
+          corrected = c;
+          break;
+        }
+      }
+      if (corrected !== -1) {
+        console.log(`    corrected name column to index ${corrected}.`);
+        nameIdx = corrected;
+      } else {
+        console.warn(`    could not find any column that looks like real names - abandoning table extraction for this page.`);
+        return [];
+      }
+    }
+  } // no table on the page had a usable header at all
 
   // Real entity table rows start with a running serial number (RBI's
   // format: "Sr. No. | Name of the Company | ..."). A headerless table is
@@ -271,7 +315,13 @@ function extractFromTable(html) {
     const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
     for (let i = startRow; i < rows.length; i++) {
       const name = (rows[i][nameIdx] || "").trim();
-      if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
+      // Defensive filter against header text leaking through as data -
+      // confirmed by a real run extracting "Sr. No." itself as if it were
+      // an entity name, alongside the wrong-column bug fixed above. This
+      // catches it regardless of why the header row wasn't cleanly
+      // excluded by the startRow calculation.
+      const isHeaderLikeText = /^(sl\.?\s*no\.?|s\.?\s*no\.?|sr\.?\s*no\.?|name(\s+of\s+the\s+compan(y|ies))?)$/i.test(name);
+      if (name && !isHeaderLikeText && name.length <= 180) {
         names.push(name);
       }
     }

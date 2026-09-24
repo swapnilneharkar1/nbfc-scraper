@@ -111,14 +111,6 @@ function looksLikeEntityName(candidate) {
 function extractFromTable(html) {
   const $ = cheerio.load(html);
   const names = [];
-
-  // Same fix as pressReleaseArchive.js - a table's schema (which column
-  // holds the name) needs to be learned once and applied to every <table>
-  // on the page, since RBI's bulk lists sometimes split across multiple
-  // tables where only the first repeats the header row. Treating tables
-  // independently silently dropped every row in headerless continuation
-  // tables - confirmed by testing, not hypothetical.
-  const tables = [];
   $("table").each((_, tableEl) => {
     const rows = [];
     $(tableEl)
@@ -130,60 +122,21 @@ function extractFromTable(html) {
           .get();
         if (cells.some((c) => c.length > 0)) rows.push(cells);
       });
-    if (rows.length > 0) tables.push(rows);
-  });
-  if (tables.length === 0) return [];
-
-  let nameIdx = -1;
-  let learnedColumnCount = null;
-  let headerTableIdx = -1;
-  for (let t = 0; t < tables.length; t++) {
-    const rows = tables[t];
+    if (rows.length < 2) return;
     const headerIdx = rows.findIndex((r) =>
       r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
     );
-    if (headerIdx !== -1) {
-      const headerRow = rows[headerIdx];
-      const idx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
-      if (idx !== -1) {
-        nameIdx = idx;
-        learnedColumnCount = headerRow.length;
-        headerTableIdx = t;
-        break;
-      }
-    }
-  }
-  if (nameIdx === -1) return [];
-
-  // Tightened guard (same reasoning as pressReleaseArchive.js): a real run
-  // showed the previous ±1 column-count tolerance was too loose and swept
-  // in unrelated tables elsewhere on the page (e.g. 119 names extracted
-  // from a page whose title stated 59 - almost exactly double). Now
-  // requires an EXACT column-count match AND a genuine numeric serial-
-  // number first column before treating a headerless table as a
-  // continuation of the entity list.
-  for (let t = 0; t < tables.length; t++) {
-    const rows = tables[t];
-    const isHeaderTable = t === headerTableIdx;
-    const headerIdx = isHeaderTable
-      ? rows.findIndex((r) => r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell)))
-      : -1;
-
-    if (!isHeaderTable) {
-      const columnCountMatches = rows.every((r) => r.length === learnedColumnCount);
-      const looksLikeSerialColumn = rows.every((r) => /^\d{1,4}$/.test((r[0] || "").trim()));
-      if (!columnCountMatches || !looksLikeSerialColumn) continue;
-    }
-
-    const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
-    for (let i = startRow; i < rows.length; i++) {
+    if (headerIdx === -1) return;
+    const headerRow = rows[headerIdx];
+    const nameIdx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
+    if (nameIdx === -1) return;
+    for (let i = headerIdx + 1; i < rows.length; i++) {
       const name = (rows[i][nameIdx] || "").trim();
       if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
         names.push(name);
       }
     }
-  }
-
+  });
   return [...new Set(names)];
 }
 
@@ -194,19 +147,16 @@ function extractFromTable(html) {
  * Fallback for releases that aren't table-formatted.
  */
 function extractFromProseList(plainText) {
-  // Same interleaving fix as pressReleaseArchive.js and customParsers.js:
-  // the pre-first-match chunk (index 0) is lead-in text, never an entity -
-  // confirmed by testing that this was still slipping through here.
-  const rawParts = plainText.split(/(?:^|\s)(\d{1,3})\.\s+/);
+  const chunks = plainText.split(/(?:^|\s)(\d{1,3})\.\s+/).filter(Boolean);
+  // split() with a capturing group interleaves the numbers themselves into
+  // the array - drop pure-number entries and keep the text chunks.
+  const candidates = chunks.filter((c) => !/^\d{1,3}$/.test(c));
 
   const names = [];
-  for (let i = 1; i < rawParts.length; i += 2) {
-    const chunk = rawParts[i + 1];
-    if (!chunk) continue;
+  for (let chunk of candidates) {
     // Cut off at the next sentence boundary so trailing prose doesn't get
-    // glued onto the name. Comma-tolerant so "XYZ LLC, Country ..." still
-    // cuts right after "LLC".
-    const cut = chunk.split(/\s{2,}|(?<=Limited|Ltd\.?|Pvt\.?|LLP|LLC|Inc\.?|Corp\.?|Corporation|Co\.|PLC|GmbH|N\.V\.),?\s+(?=[A-Z])/)[0];
+    // glued onto the name.
+    const cut = chunk.split(/\s{2,}|(?<=Limited|Ltd\.?|Pvt\.?|LLP)\s+(?=[A-Z])/)[0];
     const candidate = (cut || chunk).trim().replace(/[,;:]$/, "");
     if (looksLikeEntityName(candidate)) names.push(candidate);
   }

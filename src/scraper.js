@@ -946,6 +946,7 @@ async function reconcileWithPressReleases(masterListEntries, titleText, browser)
   }
 
   console.log(`\nMaster list date: ${masterListDate.toISOString().slice(0, 10)}`);
+  console.log(`  master list sample names: ${JSON.stringify(masterListEntries.slice(0, 3).map((e) => e.name))}`);
   console.log("Scanning RBI's press-release archive since that date for status changes...");
 
   // Archive crawl is the primary, durable source (goes back as far as
@@ -980,6 +981,9 @@ async function reconcileWithPressReleases(masterListEntries, titleText, browser)
   const { merged, unmatchedDeltas } = mergeStatuses(masterListEntries, deltas);
   const changedCount = merged.filter((m) => m.statusHistory.length > 0).length;
   console.log(`  ${changedCount} entities had a status change applied`);
+  if (changedCount === 0 && unmatchedDeltas.length > 0) {
+    console.log(`  DIAGNOSTIC: 0 matches despite ${unmatchedDeltas.length} unmatched deltas - sample unmatched entity names: ${JSON.stringify(unmatchedDeltas.slice(0, 5).map((d) => d.entityName))}`);
+  }
 
   return {
     masterListDate: masterListDate.toISOString().slice(0, 10),

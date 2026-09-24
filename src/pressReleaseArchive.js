@@ -53,6 +53,17 @@ const ACTION_PATTERNS = [
 const NBFC_HINT = /\bNBFCs?\b|non-banking financial compan/i;
 const COR_HINT = /certificate of registration|\bCoR\b|registration certificate/i;
 
+// Confirmed by checking a real false-positive: "Voluntary Surrender of
+// Certificate of Registration by NBFCs (including HFCs) for Cancellation -
+// Application Form and Indicative Checklist" matched NBFC_HINT, COR_HINT,
+// and the "Surrendered" action pattern, but is NOT a list of specific
+// entities at all - it's a procedural announcement about a form/checklist
+// being made available. Zero names is CORRECT for this release, but it
+// should never have been classified as a status-change release in the
+// first place. Titles matching this exclusion pattern are skipped outright
+// rather than producing a false "could not auto-extract" row.
+const PROCEDURAL_EXCLUSION = /application form|indicative checklist|guidelines|procedure for|framework for|master direction|circular on/i;
+
 /** Every (year, month) pair from sinceDate through today, inclusive. */
 function monthsBetween(sinceDate, today) {
   const months = [];
@@ -337,6 +348,7 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
         if (entryDate && entryDate < sinceDate) continue; // outside our window
 
         if (!NBFC_HINT.test(entry.title) && !COR_HINT.test(entry.title)) continue;
+        if (PROCEDURAL_EXCLUSION.test(entry.title)) continue; // procedural announcement, not an entity-status-change list
         const matched = ACTION_PATTERNS.find((p) => p.pattern.test(entry.title));
         if (!matched) continue;
 
@@ -350,6 +362,17 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
             timeout: 20000,
           });
           names = extractEntityNames(releaseHtml);
+          // Diagnostic: this pipeline found 425 candidate mentions in a
+          // real run but 0 matched the master list, despite roughly
+          // correct row COUNTS - meaning either the extracted "names" are
+          // actually wrong content (e.g. reading the wrong column), or a
+          // real formatting mismatch is breaking every single match.
+          // Logging a sample here (not the whole list, to keep output
+          // readable) settles which one it is from the next run's log,
+          // rather than guessing again.
+          if (names.length > 0) {
+            console.log(`    sample extracted names for "${entry.title}": ${JSON.stringify(names.slice(0, 3))}`);
+          }
         } catch (err) {
           monthNotes.push(`Failed to fetch release detail at ${entry.link}: ${err.message}`);
         }

@@ -161,11 +161,13 @@ function extractFromTable(html) {
   if (nameIdx === -1) return [];
 
   // VALIDATE the learned column, same fix as pressReleaseArchive.js: a
-  // real run showed this positional approach landing on the serial-number
-  // column instead of the name column, and a first every()-based
-  // correction attempt still failed - too strict, defeated by a single
-  // noisy row in a small sample. Uses a majority vote across all data rows
-  // instead.
+  // real run revealed (1) the trigger was too strict and missed a
+  // "62% numeric / 8% text" case that's clearly wrong but under threshold,
+  // and (2) when correction did fire, picking the highest-text-fraction
+  // column chose Address over Name (both are highly textual; Address just
+  // happened to be slightly more complete). Average string length
+  // distinguishes them reliably - Name is always shorter than a full
+  // postal address.
   {
     const dataRows = tables[headerTableIdx].slice(
       tables[headerTableIdx].findIndex((r) =>
@@ -177,27 +179,31 @@ function extractFromTable(html) {
       let numericCount = 0;
       let textCount = 0;
       let total = 0;
+      let lengthSum = 0;
       for (const r of dataRows) {
         const v = (r[c] || "").trim();
         if (!v) continue;
         total++;
+        lengthSum += v.length;
         if (/^\d{1,4}$/.test(v)) numericCount++;
         else if (v.length >= 4 && /[A-Za-z]{3,}/.test(v) && !/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(v)) textCount++;
       }
-      return { total, numericFraction: total ? numericCount / total : 0, textFraction: total ? textCount / total : 0 };
+      return {
+        total,
+        numericFraction: total ? numericCount / total : 0,
+        textFraction: total ? textCount / total : 0,
+        avgLength: total ? lengthSum / total : Infinity,
+      };
     };
     const chosenScore = scoreColumn(nameIdx);
-    if (chosenScore.numericFraction >= 0.7) {
-      let bestCol = -1;
-      let bestTextFraction = 0;
+    if (chosenScore.textFraction < 0.85) {
+      const candidates = [];
       for (let c = 0; c < columnCount; c++) {
         const s = scoreColumn(c);
-        if (s.textFraction > bestTextFraction && s.textFraction >= 0.7) {
-          bestTextFraction = s.textFraction;
-          bestCol = c;
-        }
+        if (s.textFraction >= 0.85) candidates.push({ col: c, ...s });
       }
-      if (bestCol !== -1) nameIdx = bestCol;
+      candidates.sort((a, b) => a.avgLength - b.avgLength);
+      if (candidates.length > 0) nameIdx = candidates[0].col;
       else return [];
     }
   }

@@ -241,14 +241,19 @@ function extractFromTable(html) {
   }
   if (nameIdx === -1) return [];
 
-  // VALIDATE, don't just trust, the learned column index. Confirmed by a
-  // real run: this positional approach can land on the serial-number
-  // column instead of the name column. A first attempt at self-correction
-  // (requiring EVERY sampled row to look numeric before correcting) still
-  // failed on a real run - too strict, defeated by a single noisy row in
-  // a small 5-row sample. Rewritten to use a majority vote across ALL data
-  // rows in the table, which is far more robust to occasional formatting
-  // noise (blank cells, stray punctuation, merged rows).
+  // VALIDATE, don't just trust, the learned column index. A real run
+  // revealed two distinct problems with the first two attempts at this:
+  // (1) the trigger condition (numericFraction >= 0.7) was too strict and
+  //     missed a case where the wrong column was only 62% numeric / 8%
+  //     text-like - clearly wrong, but under the threshold, so correction
+  //     never fired at all.
+  // (2) when correction DID fire, picking "whichever column has the
+  //     highest text-fraction" chose the ADDRESS column over the NAME
+  //     column, since both are >95% text-like and Address happened to
+  //     score marginally higher (every row has an address; a few rows
+  //     had a blank name). Company names are reliably much SHORTER than
+  //     full postal addresses, so average string length is used as the
+  //     actual discriminator between them once both pass the text-like bar.
   {
     const dataRows = tables[headerTableIdx].slice(
       tables[headerTableIdx].findIndex((r) =>
@@ -261,34 +266,45 @@ function extractFromTable(html) {
       let numericCount = 0;
       let textCount = 0;
       let total = 0;
+      let lengthSum = 0;
       for (const r of dataRows) {
         const v = (r[c] || "").trim();
         if (!v) continue;
         total++;
+        lengthSum += v.length;
         if (/^\d{1,4}$/.test(v)) numericCount++;
         else if (v.length >= 4 && /[A-Za-z]{3,}/.test(v) && !/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(v)) textCount++;
       }
-      return { total, numericFraction: total ? numericCount / total : 0, textFraction: total ? textCount / total : 0 };
+      return {
+        total,
+        numericFraction: total ? numericCount / total : 0,
+        textFraction: total ? textCount / total : 0,
+        avgLength: total ? lengthSum / total : Infinity,
+      };
     };
 
     const chosenScore = scoreColumn(nameIdx);
-    console.log(`    column ${nameIdx} (learned from header): ${Math.round(chosenScore.numericFraction * 100)}% numeric, ${Math.round(chosenScore.textFraction * 100)}% text-like, over ${chosenScore.total} rows`);
+    console.log(`    column ${nameIdx} (learned from header): ${Math.round(chosenScore.numericFraction * 100)}% numeric, ${Math.round(chosenScore.textFraction * 100)}% text-like, avg length ${Math.round(chosenScore.avgLength)}, over ${chosenScore.total} rows`);
 
-    if (chosenScore.numericFraction >= 0.7) {
-      console.warn(`    learned name column (index ${nameIdx}) is mostly numeric - searching for the real name column by content instead.`);
-      let bestCol = -1;
-      let bestTextFraction = 0;
+    // Trigger correction whenever the chosen column ISN'T convincingly a
+    // clean text/name column - covers both "mostly numeric" AND "neither
+    // clearly numeric nor clearly text" cases (the 62%/8% failure mode).
+    if (chosenScore.textFraction < 0.85) {
+      console.warn(`    learned name column (index ${nameIdx}) doesn't look like a clean name column - searching by content instead.`);
+      const candidates = [];
       for (let c = 0; c < columnCount; c++) {
         const s = scoreColumn(c);
-        console.log(`    column ${c}: ${Math.round(s.numericFraction * 100)}% numeric, ${Math.round(s.textFraction * 100)}% text-like`);
-        if (s.textFraction > bestTextFraction && s.textFraction >= 0.7) {
-          bestTextFraction = s.textFraction;
-          bestCol = c;
-        }
+        console.log(`    column ${c}: ${Math.round(s.numericFraction * 100)}% numeric, ${Math.round(s.textFraction * 100)}% text-like, avg length ${Math.round(s.avgLength)}`);
+        if (s.textFraction >= 0.85) candidates.push({ col: c, ...s });
       }
-      if (bestCol !== -1) {
-        console.log(`    corrected name column to index ${bestCol}.`);
-        nameIdx = bestCol;
+      // Among genuinely text-like columns, prefer the SHORTEST average
+      // length - Name is reliably shorter than Address, and this also
+      // naturally avoids picking a long free-text remarks/description
+      // column over the name column.
+      candidates.sort((a, b) => a.avgLength - b.avgLength);
+      if (candidates.length > 0) {
+        console.log(`    corrected name column to index ${candidates[0].col} (shortest avg length among text-like columns).`);
+        nameIdx = candidates[0].col;
       } else {
         console.warn(`    could not find any column that looks like real names by content - abandoning table extraction for this page.`);
         return [];

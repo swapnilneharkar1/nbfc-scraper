@@ -101,28 +101,31 @@ function looksLikeEntityName(candidate) {
 }
 
 /**
- * Extracts entity names from a genuine <table> in the release's HTML -
+ * Extracts entity names from a genuine <table> on the press-release page -
  * confirmed to be how RBI formats BULK cancellation notices (e.g. "cancels
  * ... of 59 NBFCs"): a real table with columns like "Sr. No. | Name of the
- * Company | Registered Office Address | ...". A numbered-prose regex
- * requiring "1." will never match this format's "1 Company Name" (no
- * period) - this was a real bug, confirmed by fetching an actual RBI
- * release page and finding zero matches despite the data being right there
- * in a table. NOTE: RSS <description> fields are sometimes truncated/
- * simplified compared to the full page, so this may not always have a
- * table to find even when the source page does - that's fine, it falls
- * through to the prose extractor below in that case.
+ * Company | Registered Office Address | CoR No. | CoR Issued on |
+ * Cancellation Order Date".
+ *
+ * REDESIGNED after a real regression: an earlier version learned the name
+ * column from ONE table (the first with a matching header) and applied
+ * that same column index to every other table on the page. A real run
+ * showed this landing on a structurally unrelated table (49 columns of
+ * alternating numeric/text data - nothing like RBI's actual 6-column
+ * format), producing garbage. An even earlier, simpler version - each
+ * table computes its own header and name-column independently - is
+ * confirmed (by the person using this) to have correctly extracted real
+ * names, just with an over-counting problem from blindly treating every
+ * OTHER table as a continuation. This version restores per-table
+ * independence for name-column detection (the part that worked) while
+ * keeping continuation-table support only as an explicit, narrow
+ * allowance for genuinely headerless tables that pass a strict content
+ * check - it never overrides a table's own successfully-detected header.
  */
 function extractFromTable(html) {
   const $ = cheerio.load(html);
   const names = [];
 
-  // Same fix as pressReleaseArchive.js - a table's schema (which column
-  // holds the name) needs to be learned once and applied to every <table>
-  // on the page, since RBI's bulk lists sometimes split across multiple
-  // tables where only the first repeats the header row. Treating tables
-  // independently silently dropped every row in headerless continuation
-  // tables - confirmed by testing, not hypothetical.
   const tables = [];
   $("table").each((_, tableEl) => {
     const rows = [];
@@ -138,103 +141,102 @@ function extractFromTable(html) {
     if (rows.length > 0) tables.push(rows);
   });
   if (tables.length === 0) return [];
+  console.log(`    (found ${tables.length} <table> element(s) on the page)`);
 
-  let nameIdx = -1;
-  let learnedColumnCount = null;
-  let headerTableIdx = -1;
+  const isHeaderLikeText = (v) =>
+    /^(sl\.?\s*no\.?|s\.?\s*no\.?|sr\.?\s*no\.?|name(\s+of\s+the\s+compan(y|ies))?)$/i.test(v);
+
+  // Scores how well a column's data (given the rows after its header)
+  // looks like company names vs. a serial-number column - used both to
+  // sanity-check a table's own header-derived column, and to evaluate
+  // candidate columns for headerless continuation tables.
+  const scoreColumn = (dataRows, c) => {
+    let numericCount = 0;
+    let textCount = 0;
+    let total = 0;
+    let lengthSum = 0;
+    for (const r of dataRows) {
+      const v = (r[c] || "").trim();
+      if (!v) continue;
+      total++;
+      lengthSum += v.length;
+      if (/^\d{1,4}$/.test(v)) numericCount++;
+      else if (v.length >= 4 && /[A-Za-z]{3,}/.test(v) && !/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(v)) textCount++;
+    }
+    return {
+      total,
+      numericFraction: total ? numericCount / total : 0,
+      textFraction: total ? textCount / total : 0,
+      avgLength: total ? lengthSum / total : Infinity,
+    };
+  };
+
+  // Processed independently per table - this is the behaviour confirmed
+  // to have worked for actual name extraction. lastGoodSchema carries
+  // forward only for genuinely headerless tables immediately after a
+  // successfully-processed one, as a narrow continuation allowance.
+  let lastGoodSchema = null; // { nameIdx, columnCount }
+
   for (let t = 0; t < tables.length; t++) {
     const rows = tables[t];
     const headerIdx = rows.findIndex((r) =>
       r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
     );
+
     if (headerIdx !== -1) {
+      // This table has its own header - trust it, but still sanity-check
+      // against the actual data (the Name-vs-Address / wrong-column bug
+      // could still occur on a well-formed single table).
       const headerRow = rows[headerIdx];
-      const idx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
-      if (idx !== -1) {
-        nameIdx = idx;
-        learnedColumnCount = headerRow.length;
-        headerTableIdx = t;
-        break;
-      }
-    }
-  }
-  if (nameIdx === -1) return [];
+      let nameIdx = headerRow.findIndex((h) => /name of the compan|name of company|\bname\b/i.test(h));
+      if (nameIdx === -1) continue;
 
-  // VALIDATE the learned column, same fix as pressReleaseArchive.js: a
-  // real run revealed (1) the trigger was too strict and missed a
-  // "62% numeric / 8% text" case that's clearly wrong but under threshold,
-  // and (2) when correction did fire, picking the highest-text-fraction
-  // column chose Address over Name (both are highly textual; Address just
-  // happened to be slightly more complete). Average string length
-  // distinguishes them reliably - Name is always shorter than a full
-  // postal address.
-  {
-    const dataRows = tables[headerTableIdx].slice(
-      tables[headerTableIdx].findIndex((r) =>
-        r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
-      ) + 1
-    );
-    const columnCount = Math.max(...dataRows.map((r) => r.length), 0);
-    const scoreColumn = (c) => {
-      let numericCount = 0;
-      let textCount = 0;
-      let total = 0;
-      let lengthSum = 0;
-      for (const r of dataRows) {
-        const v = (r[c] || "").trim();
-        if (!v) continue;
-        total++;
-        lengthSum += v.length;
-        if (/^\d{1,4}$/.test(v)) numericCount++;
-        else if (v.length >= 4 && /[A-Za-z]{3,}/.test(v) && !/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(v)) textCount++;
+      const dataRows = rows.slice(headerIdx + 1);
+      const chosenScore = scoreColumn(dataRows, nameIdx);
+      if (chosenScore.textFraction < 0.85) {
+        const candidates = [];
+        const columnCount = Math.max(...dataRows.map((r) => r.length), 0);
+        for (let c = 0; c < columnCount; c++) {
+          const s = scoreColumn(dataRows, c);
+          if (s.textFraction >= 0.85) candidates.push({ col: c, ...s });
+        }
+        candidates.sort((a, b) => a.avgLength - b.avgLength);
+        if (candidates.length > 0) {
+          console.log(`    table ${t + 1}/${tables.length}: corrected name column from ${nameIdx} to ${candidates[0].col} (own header didn't align with its data).`);
+          nameIdx = candidates[0].col;
+        } else {
+          console.warn(`    table ${t + 1}/${tables.length}: header found but no column looks like real names - skipping this table.`);
+          continue;
+        }
       }
-      return {
-        total,
-        numericFraction: total ? numericCount / total : 0,
-        textFraction: total ? textCount / total : 0,
-        avgLength: total ? lengthSum / total : Infinity,
-      };
-    };
-    const chosenScore = scoreColumn(nameIdx);
-    if (chosenScore.textFraction < 0.85) {
-      const candidates = [];
-      for (let c = 0; c < columnCount; c++) {
-        const s = scoreColumn(c);
-        if (s.textFraction >= 0.85) candidates.push({ col: c, ...s });
+
+      for (const row of dataRows) {
+        const name = (row[nameIdx] || "").trim();
+        if (name && !isHeaderLikeText(name) && name.length <= 180) names.push(name);
       }
-      candidates.sort((a, b) => a.avgLength - b.avgLength);
-      if (candidates.length > 0) nameIdx = candidates[0].col;
-      else return [];
-    }
-  }
 
-  // Tightened guard (same reasoning as pressReleaseArchive.js): a real run
-  // showed the previous ±1 column-count tolerance was too loose and swept
-  // in unrelated tables elsewhere on the page (e.g. 119 names extracted
-  // from a page whose title stated 59 - almost exactly double). Now
-  // requires an EXACT column-count match AND a genuine numeric serial-
-  // number first column before treating a headerless table as a
-  // continuation of the entity list.
-  for (let t = 0; t < tables.length; t++) {
-    const rows = tables[t];
-    const isHeaderTable = t === headerTableIdx;
-    const headerIdx = isHeaderTable
-      ? rows.findIndex((r) => r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell)))
-      : -1;
-
-    if (!isHeaderTable) {
-      const columnCountMatches = rows.every((r) => r.length === learnedColumnCount);
-      const looksLikeSerialColumn = rows.every((r) => /^\d{1,4}$/.test((r[0] || "").trim()));
-      if (!columnCountMatches || !looksLikeSerialColumn) continue;
+      lastGoodSchema = { nameIdx, columnCount: headerRow.length };
+      continue;
     }
 
-    const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
-    for (let i = startRow; i < rows.length; i++) {
-      const name = (rows[i][nameIdx] || "").trim();
-      const isHeaderLikeText = /^(sl\.?\s*no\.?|s\.?\s*no\.?|sr\.?\s*no\.?|name(\s+of\s+the\s+compan(y|ies))?)$/i.test(name);
-      if (name && !isHeaderLikeText && name.length <= 180) {
-        names.push(name);
-      }
+    // No header in this table - only treat it as a continuation of the
+    // MOST RECENTLY successfully-processed table (not an arbitrary global
+    // schema), and only if it passes a strict content check: exact column
+    // count match AND a genuine numeric serial-number first column.
+    if (!lastGoodSchema) {
+      console.log(`    (skipping headerless table ${t + 1}/${tables.length} - no prior table to treat it as a continuation of)`);
+      continue;
+    }
+    const columnCountMatches = rows.every((r) => r.length === lastGoodSchema.columnCount);
+    const looksLikeSerialColumn = rows.every((r) => /^\d{1,4}$/.test((r[0] || "").trim()));
+    if (!columnCountMatches || !looksLikeSerialColumn) {
+      console.log(`    (skipping headerless table ${t + 1}/${tables.length} - doesn't look like a continuation of the entity list)`);
+      continue;
+    }
+    console.log(`    (treating headerless table ${t + 1}/${tables.length} as a continuation of the previous table)`);
+    for (const row of rows) {
+      const name = (row[lastGoodSchema.nameIdx] || "").trim();
+      if (name && !isHeaderLikeText(name) && name.length <= 180) names.push(name);
     }
   }
 

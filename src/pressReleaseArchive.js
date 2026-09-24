@@ -243,47 +243,58 @@ function extractFromTable(html) {
 
   // VALIDATE, don't just trust, the learned column index. Confirmed by a
   // real run: this positional approach can land on the serial-number
-  // column instead of the name column (extracted "names" were literally
-  // ["Sr. No.", "1", "2", ...]) - almost certainly because RBI's header
-  // row uses a merged/colspan cell that doesn't align 1:1 with the data
-  // rows' actual column positions. Rather than assume why, directly check
-  // whether the chosen column's data looks like real names (contains
-  // letters) or looks like a serial column (pure digits) and self-correct
-  // by scanning for the first column that actually looks like text.
+  // column instead of the name column. A first attempt at self-correction
+  // (requiring EVERY sampled row to look numeric before correcting) still
+  // failed on a real run - too strict, defeated by a single noisy row in
+  // a small 5-row sample. Rewritten to use a majority vote across ALL data
+  // rows in the table, which is far more robust to occasional formatting
+  // noise (blank cells, stray punctuation, merged rows).
   {
-    const headerRows = tables[headerTableIdx];
-    const headerIdx = headerRows.findIndex((r) =>
-      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    const dataRows = tables[headerTableIdx].slice(
+      tables[headerTableIdx].findIndex((r) =>
+        r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+      ) + 1
     );
-    const sampleRows = headerRows.slice(headerIdx + 1, headerIdx + 6);
-    const chosenColumnLooksNumeric =
-      sampleRows.length > 0 && sampleRows.every((r) => /^\d{1,4}$/.test((r[nameIdx] || "").trim()));
+    const columnCount = Math.max(...dataRows.map((r) => r.length), 0);
 
-    if (chosenColumnLooksNumeric) {
-      console.warn(
-        `    learned name column (index ${nameIdx}) looks like a serial-number column, not names - searching for the real name column instead.`
-      );
-      const columnCount = Math.max(...sampleRows.map((r) => r.length));
-      let corrected = -1;
+    const scoreColumn = (c) => {
+      let numericCount = 0;
+      let textCount = 0;
+      let total = 0;
+      for (const r of dataRows) {
+        const v = (r[c] || "").trim();
+        if (!v) continue;
+        total++;
+        if (/^\d{1,4}$/.test(v)) numericCount++;
+        else if (v.length >= 4 && /[A-Za-z]{3,}/.test(v) && !/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(v)) textCount++;
+      }
+      return { total, numericFraction: total ? numericCount / total : 0, textFraction: total ? textCount / total : 0 };
+    };
+
+    const chosenScore = scoreColumn(nameIdx);
+    console.log(`    column ${nameIdx} (learned from header): ${Math.round(chosenScore.numericFraction * 100)}% numeric, ${Math.round(chosenScore.textFraction * 100)}% text-like, over ${chosenScore.total} rows`);
+
+    if (chosenScore.numericFraction >= 0.7) {
+      console.warn(`    learned name column (index ${nameIdx}) is mostly numeric - searching for the real name column by content instead.`);
+      let bestCol = -1;
+      let bestTextFraction = 0;
       for (let c = 0; c < columnCount; c++) {
-        const looksLikeText = sampleRows.every((r) => {
-          const v = (r[c] || "").trim();
-          return v.length >= 3 && /[A-Za-z]{3,}/.test(v);
-        });
-        if (looksLikeText) {
-          corrected = c;
-          break;
+        const s = scoreColumn(c);
+        console.log(`    column ${c}: ${Math.round(s.numericFraction * 100)}% numeric, ${Math.round(s.textFraction * 100)}% text-like`);
+        if (s.textFraction > bestTextFraction && s.textFraction >= 0.7) {
+          bestTextFraction = s.textFraction;
+          bestCol = c;
         }
       }
-      if (corrected !== -1) {
-        console.log(`    corrected name column to index ${corrected}.`);
-        nameIdx = corrected;
+      if (bestCol !== -1) {
+        console.log(`    corrected name column to index ${bestCol}.`);
+        nameIdx = bestCol;
       } else {
-        console.warn(`    could not find any column that looks like real names - abandoning table extraction for this page.`);
+        console.warn(`    could not find any column that looks like real names by content - abandoning table extraction for this page.`);
         return [];
       }
     }
-  } // no table on the page had a usable header at all
+  }
 
   // Real entity table rows start with a running serial number (RBI's
   // format: "Sr. No. | Name of the Company | ..."). A headerless table is

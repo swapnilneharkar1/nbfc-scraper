@@ -162,30 +162,42 @@ function extractFromTable(html) {
 
   // VALIDATE the learned column, same fix as pressReleaseArchive.js: a
   // real run showed this positional approach landing on the serial-number
-  // column instead of the name column. Self-correct by checking whether
-  // the chosen column's data actually looks like text.
+  // column instead of the name column, and a first every()-based
+  // correction attempt still failed - too strict, defeated by a single
+  // noisy row in a small sample. Uses a majority vote across all data rows
+  // instead.
   {
-    const headerRows = tables[headerTableIdx];
-    const headerIdxForValidation = headerRows.findIndex((r) =>
-      r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+    const dataRows = tables[headerTableIdx].slice(
+      tables[headerTableIdx].findIndex((r) =>
+        r.some((cell) => /name of the compan|name of company|\bname\b/i.test(cell))
+      ) + 1
     );
-    const sampleRows = headerRows.slice(headerIdxForValidation + 1, headerIdxForValidation + 6);
-    const chosenColumnLooksNumeric =
-      sampleRows.length > 0 && sampleRows.every((r) => /^\d{1,4}$/.test((r[nameIdx] || "").trim()));
-    if (chosenColumnLooksNumeric) {
-      const columnCount = Math.max(...sampleRows.map((r) => r.length));
-      let corrected = -1;
+    const columnCount = Math.max(...dataRows.map((r) => r.length), 0);
+    const scoreColumn = (c) => {
+      let numericCount = 0;
+      let textCount = 0;
+      let total = 0;
+      for (const r of dataRows) {
+        const v = (r[c] || "").trim();
+        if (!v) continue;
+        total++;
+        if (/^\d{1,4}$/.test(v)) numericCount++;
+        else if (v.length >= 4 && /[A-Za-z]{3,}/.test(v) && !/^[A-Za-z]+\s+\d{1,2},?\s+\d{4}$/.test(v)) textCount++;
+      }
+      return { total, numericFraction: total ? numericCount / total : 0, textFraction: total ? textCount / total : 0 };
+    };
+    const chosenScore = scoreColumn(nameIdx);
+    if (chosenScore.numericFraction >= 0.7) {
+      let bestCol = -1;
+      let bestTextFraction = 0;
       for (let c = 0; c < columnCount; c++) {
-        const looksLikeText = sampleRows.every((r) => {
-          const v = (r[c] || "").trim();
-          return v.length >= 3 && /[A-Za-z]{3,}/.test(v);
-        });
-        if (looksLikeText) {
-          corrected = c;
-          break;
+        const s = scoreColumn(c);
+        if (s.textFraction > bestTextFraction && s.textFraction >= 0.7) {
+          bestTextFraction = s.textFraction;
+          bestCol = c;
         }
       }
-      if (corrected !== -1) nameIdx = corrected;
+      if (bestCol !== -1) nameIdx = bestCol;
       else return [];
     }
   }

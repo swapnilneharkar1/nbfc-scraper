@@ -86,6 +86,10 @@ async function fetchFeedItems() {
 /** Strips HTML tags/entities down to plain text for regex-based name extraction. */
 function htmlToText(html) {
   const $ = cheerio.load(html);
+  // Separate block-level elements with a space so text from adjacent
+  // cells/paragraphs is never glued together ("Limited" + "Sr. No." ->
+  // "LimitedSr. No."), which breaks name cut-offs downstream.
+  $("br,p,div,tr,td,th,li,table,h1,h2,h3,h4,h5,h6").after(" ");
   return $.root().text().replace(/\s+/g, " ").trim();
 }
 

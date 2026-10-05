@@ -26,8 +26,10 @@ import { writeWorkbook } from "./excelWriter.js";
 import { fetchNbfcStatusDeltas } from "./pressReleases.js";
 import { fetchNbfcStatusDeltasFromArchive } from "./pressReleaseArchive.js";
 import { mergeStatuses, extractMasterListDate } from "./statusMerge.js";
-import { parseRbiBanksSection, parseRbiPssSection, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
+import { parseRbiBanksSection, parseRbiPssSection, parseRbiStateCoop, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
+import { resolveSebiIntmId } from "./sebiUtils.js";
 import { getRank } from "./priorityMatrix.js";
+import { guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
 
 const OUTPUT_DIR = path.resolve("output");
 const DOWNLOAD_DIR = path.resolve("output", "downloads");
@@ -37,6 +39,20 @@ const MANUAL_DIR = path.resolve("manual-downloads");
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 fs.mkdirSync(MANUAL_DIR, { recursive: true });
+
+const DIAGNOSTICS_DIR = path.resolve("output", "diagnostics");
+
+/** Best-effort: saves a page's raw HTML / rendered text so a source that
+ * returns the wrong thing can be inspected after the run (the GitHub
+ * Actions workflow uploads this folder). Never throws. */
+function saveDiagnostic(fileName, content) {
+  try {
+    fs.mkdirSync(DIAGNOSTICS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(DIAGNOSTICS_DIR, fileName), content);
+  } catch {
+    /* diagnostics are optional */
+  }
+}
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -48,6 +64,9 @@ const USER_AGENT =
  */
 function extractTables(html, selector = "table") {
   const $ = cheerio.load(html);
+  // A <br> inside a cell separates two pieces of text; without this the
+  // cell's text is glued together ("...LimitedAditya Birla...").
+  $("br").replaceWith(" ");
   const tables = [];
   $(selector).each((_, tableEl) => {
     const rows = [];
@@ -65,52 +84,13 @@ function extractTables(html, selector = "table") {
   return tables;
 }
 
-/** Same header-row heuristic used for xlsx sheets - see findHeaderRowIndex(). */
-function findHeaderRowIndex(rows) {
-  const labelPattern = /name|company|entity|institution|sl\.?\s*no/i;
-  let fallback = -1;
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const nonEmptyCount = rows[i].filter(Boolean).length;
-    if (nonEmptyCount < 2) continue; // likely a title/merged-cell row
-    if (fallback === -1) fallback = i;
-    if (rows[i].some((cell) => labelPattern.test(cell))) return i;
-  }
-  return fallback;
-}
-
-/** Guess which column in a scraped table is the entity/company name. */
-function guessNameColumnIndex(headerRow) {
-  const patterns = [/name/i, /company/i, /entity/i, /institution/i];
-  for (const p of patterns) {
-    const idx = headerRow.findIndex((h) => p.test(h));
-    if (idx !== -1) return idx;
-  }
-  return 0; // fall back to first column
-}
-
-// A real entity name is a handful of words, not a page of prose. Pages
-// like RBI's PSS/Banks listings aren't built from real <table> markup, so
-// naive table scraping on them yields one giant blob per "row" - this cap
-// throws those out instead of polluting the output with garbage.
-const MAX_PLAUSIBLE_NAME_LENGTH = 180;
-
-function rowsToNames(table) {
-  const headerIdx = findHeaderRowIndex(table);
-  if (headerIdx === -1) return [];
-  const header = table[headerIdx];
-  const nameIdx = guessNameColumnIndex(header);
-  return table
-    .slice(headerIdx + 1)
-    .map((r) => (r[nameIdx] || "").trim())
-    .filter((name) => name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name))
-    .filter((name) => name.length <= MAX_PLAUSIBLE_NAME_LENGTH);
-}
 
 async function scrapeHtmlTable(source) {
   const { data: html } = await axios.get(source.url, {
     headers: { "User-Agent": USER_AGENT },
     timeout: 30000,
   });
+  saveDiagnostic(`${source.key}.html`, typeof html === "string" ? html : String(html));
   const tables = extractTables(html, source.tableSelector || "table");
   const names = tables.flatMap(rowsToNames);
   return { names: dedupe(names), titleText: null };
@@ -134,8 +114,15 @@ async function scrapeAspxDynamic(source, browser) {
       .catch(() => null);
 
     const html = await page.content();
+    saveDiagnostic(`${source.key}.html`, html);
+    try {
+      saveDiagnostic(`${source.key}.txt`, await page.evaluate(() => (document.body ? document.body.innerText : "")));
+    } catch {
+      /* optional */
+    }
     const tables = extractTables(html, source.tableSelector || "table");
-    const names = dedupe(tables.flatMap(rowsToNames));
+
+    const names = namesFromTables(tables, source, (msg) => console.log(msg));
 
     if (names.length > 0) return { names, titleText: null };
 
@@ -416,6 +403,7 @@ async function run() {
       let classifications = new Map(); // per-entity override of categoryAsPerRegulator (BRD #3)
       let status = "ok";
       let error = null;
+      let scrapeNote = null;
 
       try {
         if (source.type === "html_table") {
@@ -427,17 +415,31 @@ async function run() {
         } else if (source.type === "pdf_link") {
           ({ names, titleText } = await scrapePdfLink(source));
         } else if (source.type === "rbi_banks_custom") {
-          ({ names } = await scrapeRbiBanksCustom(source, browser));
+          ({ names, note: scrapeNote } = await scrapeRbiBanksCustom(source, browser));
+        } else if (source.type === "rbi_state_coop_custom") {
+          ({ names, note: scrapeNote } = await scrapeRbiStateCoopCustom(source, browser));
         } else if (source.type === "rbi_pss_custom") {
-          ({ names } = await scrapeRbiPssCustom(source, browser));
+          ({ names, note: scrapeNote } = await scrapeRbiPssCustom(source, browser));
         } else if (source.type === "sebi_intermediary_custom") {
           {
             const sebiPage = await browser.newPage();
             await sebiPage.setUserAgent(USER_AGENT);
             try {
-              const intmIdMatch = source.url.match(/intmId=(\d+)/);
-              const expectedCount = intmIdMatch ? sebiHubCounts.get(intmIdMatch[1])?.expectedCount : null;
-              ({ names } = await scrapeSebiIntermediaryCustom(source, sebiPage, expectedCount, sebiHubPage));
+              const resolved = resolveSebiIntmId(source, sebiHubCounts);
+              if (resolved.warning) console.warn(`  ${resolved.warning}`);
+              const effectiveSource = resolved.intmId && resolved.changedFrom
+                ? { ...source, url: source.url.replace(/intmId=\d+/, `intmId=${resolved.intmId}`) }
+                : source;
+              const result = await scrapeSebiIntermediaryCustom(effectiveSource, sebiPage, resolved.expectedCount, sebiHubPage);
+              names = result.names;
+              scrapeNote = [
+                `hub label: ${resolved.hubLabel || "n/a"}`,
+                `intmId used: ${resolved.intmId || "n/a"}${resolved.changedFrom ? ` (configured ${resolved.changedFrom})` : ""}`,
+                `expected: ${resolved.expectedCount ?? "unknown"}`,
+                `got: ${names.length}`,
+                result.via ? `via: ${result.via}` : null,
+                resolved.warning,
+              ].filter(Boolean).join("; ");
             } finally {
               await sebiPage.close();
             }
@@ -489,6 +491,7 @@ async function run() {
         ms: Date.now() - started,
         error,
         notes: source.notes || null,
+        scrapeNote,
       });
 
       console.log(`  -> ${status}, ${names.length} names`);
@@ -591,37 +594,60 @@ function resolveWithPriorityMatrix(rawHits) {
   return { resolved, multiCategoryEntities };
 }
 
-/** BRD issues #2 and #4: RBI's Banks page needs entity-wise extraction with
- * correct bank sub-classification - see customParsers.js for why this can't
- * be a generic table scrape. */
-async function scrapeRbiBanksCustom(source, browser) {
+// RBI's Banks page and PSS page are each read by many sources (8 bank
+// categories, 5 PSS statuses). Load each URL once per run and keep both the
+// HTML and the browser's rendered text (which preserves line/cell breaks
+// that flattening the HTML loses - needed to separate a name from the
+// address or status text that follows it).
+const rbiPageCache = new Map(); // url -> { html, innerText }
+
+async function loadRbiPage(url, browser, diagnosticName) {
+  if (rbiPageCache.has(url)) return rbiPageCache.get(url);
   const page = await browser.newPage();
   await page.setUserAgent(USER_AGENT);
   try {
-    await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
     const html = await page.content();
-    const { names, note } = parseRbiBanksSection(html, source.bankSection);
-    if (note) console.warn(`  ${note}`);
-    return { names };
+    const innerText = await page.evaluate(() => (document.body ? document.body.innerText : "")).catch(() => "");
+    saveDiagnostic(`${diagnosticName}.html`, html);
+    saveDiagnostic(`${diagnosticName}.txt`, innerText);
+    const loaded = { html, innerText };
+    rbiPageCache.set(url, loaded);
+    return loaded;
   } finally {
     await page.close();
   }
 }
 
+/** BRD issues #2 and #4: RBI's Banks page needs entity-wise extraction with
+ * correct bank sub-classification - see customParsers.js for why this can't
+ * be a generic table scrape. */
+async function scrapeRbiBanksCustom(source, browser) {
+  const { html, innerText } = await loadRbiPage(source.url, browser, "rbi-banks-page");
+  const { names, note } = parseRbiBanksSection(html, source.bankSection, innerText);
+  if (note) console.warn(`  ${note}`);
+  return { names, note };
+}
+
+/** State Co-operative Banks: one numbered block on the Banks page, split
+ * into scheduled / non-scheduled - see parseRbiStateCoop(). */
+async function scrapeRbiStateCoopCustom(source, browser) {
+  const { html, innerText } = await loadRbiPage(source.url, browser, "rbi-banks-page");
+  const { names, note } = parseRbiStateCoop(html, innerText, {
+    scope: source.coopScope,
+    nonScheduledKeywords: source.nonScheduledKeywords || [],
+  });
+  if (note) console.log(`  ${note}`);
+  return { names, note };
+}
+
 /** BRD issues #2 and #4: RBI's PSS page needs entity-wise extraction per
  * status category - see customParsers.js. */
 async function scrapeRbiPssCustom(source, browser) {
-  const page = await browser.newPage();
-  await page.setUserAgent(USER_AGENT);
-  try {
-    await page.goto(source.url, { waitUntil: "networkidle2", timeout: 45000 });
-    const html = await page.content();
-    const { names, note } = parseRbiPssSection(html, source.pssSection);
-    if (note) console.warn(`  ${note}`);
-    return { names };
-  } finally {
-    await page.close();
-  }
+  const { html, innerText } = await loadRbiPage(source.url, browser, "rbi-pss-page");
+  const { names, note } = parseRbiPssSection(html, source.pssSection, innerText);
+  if (note) console.warn(`  ${note}`);
+  return { names, note };
 }
 
 /** BRD-relevant fix: SEBI's "Recognised Intermediaries" pages have no real
@@ -690,12 +716,27 @@ const SEBI_DOWNLOAD_DIR = path.resolve("output", "sebi-downloads");
  * caller can distinguish "genuinely got zero records" from "this approach
  * didn't work for this category, fall back to pagination."
  */
-async function tryDownloadFromHub(hubPage, intmId) {
+async function tryDownloadFromHub(hubPage, intmId, expectedCount = null) {
   fs.mkdirSync(SEBI_DOWNLOAD_DIR, { recursive: true });
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Let any download still in flight from the previous category finish
+  // first, so a late file can never be mistaken for this category's.
+  const settleStart = Date.now();
+  while (Date.now() - settleStart < 30000 && fs.readdirSync(SEBI_DOWNLOAD_DIR).some((f) => f.endsWith(".crdownload"))) {
+    await sleep(500);
+  }
   const before = new Set(fs.readdirSync(SEBI_DOWNLOAD_DIR));
 
-  const clicked = await hubPage.evaluate((intmId) => {
-    const rowLink = Array.from(document.querySelectorAll(`a[href*="intmId=${intmId}"]`))[0];
+  const clicked = await hubPage.evaluate((id) => {
+    // EXACT intmId match. The previous a[href*="intmId=2"] selector also
+    // matched intmId=21/23/25/27 and used whichever came first on the page,
+    // so categories with a single-digit id (2, 5, 6, 7, 9) could download a
+    // different category's file.
+    const exact = new RegExp(`[?&]intmId=${id}(?:&|$)`);
+    const rowLink = Array.from(document.querySelectorAll("a[href*='intmId=']")).find((a) =>
+      exact.test(a.getAttribute("href") || "")
+    );
     if (!rowLink) return false;
     const row = rowLink.closest("tr");
     if (!row) return false;
@@ -705,21 +746,25 @@ async function tryDownloadFromHub(hubPage, intmId) {
     if (!downloadLink) return false;
     downloadLink.click();
     return true;
-  }, intmId);
+  }, String(intmId));
 
   if (!clicked) return null;
 
-  // Poll for a new file to land in the download directory.
-  const timeoutMs = 20000;
+  // Poll for a new file to land in the download directory. Big categories
+  // (thousands of records) take longer to generate.
+  const timeoutMs = expectedCount && expectedCount > 1000 ? 90000 : 30000;
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const after = fs.readdirSync(SEBI_DOWNLOAD_DIR);
-    const newFile = after.find((f) => !before.has(f) && !f.endsWith(".crdownload"));
-    if (newFile) {
+    await sleep(500);
+    const fresh = fs
+      .readdirSync(SEBI_DOWNLOAD_DIR)
+      .filter((f) => !before.has(f) && !f.endsWith(".crdownload"))
+      .map((f) => ({ f, t: fs.statSync(path.join(SEBI_DOWNLOAD_DIR, f)).mtimeMs }))
+      .sort((x, y) => y.t - x.t);
+    if (fresh.length > 0) {
       // Give Chrome a moment to finish flushing the file to disk.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      return path.join(SEBI_DOWNLOAD_DIR, newFile);
+      await sleep(800);
+      return path.join(SEBI_DOWNLOAD_DIR, fresh[0].f);
     }
   }
   return null;
@@ -828,23 +873,27 @@ async function parseSebiDownloadedFile(filePath) {
 
 async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage) {
   // Try the download route first - if SEBI's Download button produces a
-  // genuine full-list file, this is far more reliable than paginating
-  // through potentially hundreds of pages.
+  // genuine full-list file, this is far more reliable than paginating.
+  // If the file is short of SEBI's own hub count, its names seed the
+  // pagination walk below and the union is returned.
+  let downloadNames = [];
+  let via = "pagination";
   if (hubPage) {
     const intmIdMatch = source.url.match(/intmId=(\d+)/);
     if (intmIdMatch) {
       try {
-        const downloadedFile = await tryDownloadFromHub(hubPage, intmIdMatch[1]);
+        const downloadedFile = await tryDownloadFromHub(hubPage, intmIdMatch[1], expectedCount);
         if (downloadedFile) {
-          const names = await parseSebiDownloadedFile(downloadedFile);
-          if (names.length > 0) {
-            console.log(`  got ${names.length} names via Download button (${path.basename(downloadedFile)})`);
-            if (expectedCount && names.length < expectedCount) {
-              console.warn(`  downloaded file has ${names.length}, expected ${expectedCount} - may itself be incomplete or paginated.`);
+          downloadNames = await parseSebiDownloadedFile(downloadedFile);
+          if (downloadNames.length > 0) {
+            console.log(`  got ${downloadNames.length} names via Download button (${path.basename(downloadedFile)})`);
+            if (!expectedCount || downloadNames.length >= Math.floor(expectedCount * 0.97)) {
+              return { names: downloadNames, via: "download" };
             }
-            return { names };
+            console.warn(`  downloaded file has ${downloadNames.length}, expected ${expectedCount} - topping up via pagination.`);
+          } else {
+            console.warn(`  downloaded file produced 0 names (${downloadedFile}) - falling back to pagination.`);
           }
-          console.warn(`  downloaded file produced 0 names (${downloadedFile}) - falling back to pagination.`);
         } else {
           console.log(`  no file appeared from Download button within timeout - falling back to pagination.`);
         }
@@ -859,7 +908,7 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
   let html = await page.content();
   let { names, note } = parseSebiIntermediaryPage(html);
   if (note) console.warn(`  ${note}`);
-  let allNames = new Set(names);
+  let allNames = new Set([...downloadNames, ...names]);
 
   const target = expectedCount || null;
   if (target) console.log(`  target from hub page: ${target} records`);
@@ -918,7 +967,7 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
     console.log(`  reached full expected count: ${finalNames.length}/${target}`);
   }
 
-  return { names: finalNames };
+  return { names: finalNames, via: downloadNames.length ? "download+pagination" : "pagination" };
 }
 
 /**
@@ -978,9 +1027,16 @@ async function reconcileWithPressReleases(masterListEntries, titleText, browser)
   const deltas = [...archiveDeltas, ...dedupedRss];
   console.log(`  ${deltas.length} total candidate status-change mention(s) after combining archive + RSS`);
 
-  const { merged, unmatchedDeltas } = mergeStatuses(masterListEntries, deltas);
+  const { merged, unmatchedDeltas, releaseSummary } = mergeStatuses(masterListEntries, deltas);
   const changedCount = merged.filter((m) => m.statusHistory.length > 0).length;
   console.log(`  ${changedCount} entities had a status change applied`);
+  for (const r of releaseSummary) {
+    const matched = r.exact + r.normalised + r.alias + r.approximate;
+    console.log(
+      `    "${r.prTitle}": expected ${r.expectedCount ?? "n/a"}, extracted ${r.extracted}, matched ${matched} ` +
+        `(exact ${r.exact}, normalised ${r.normalised}, alias ${r.alias}, approximate ${r.approximate}), not in master list ${r.notInMaster}`
+    );
+  }
   if (changedCount === 0 && unmatchedDeltas.length > 0) {
     console.log(`  DIAGNOSTIC: 0 matches despite ${unmatchedDeltas.length} unmatched deltas - sample unmatched entity names: ${JSON.stringify(unmatchedDeltas.slice(0, 5).map((d) => d.entityName))}`);
   }
@@ -989,6 +1045,7 @@ async function reconcileWithPressReleases(masterListEntries, titleText, browser)
     masterListDate: masterListDate.toISOString().slice(0, 10),
     merged,
     unmatchedDeltas,
+    releaseSummary,
     unattributedDeltas: deltas.filter((d) => !d.entityName),
   };
 }

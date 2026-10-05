@@ -26,6 +26,27 @@
  *   - "manual"            : no realistic bulk-scrape target
  */
 
+/**
+ * RBI's Banks page does not separate scheduled from non-scheduled State
+ * Co-operative Banks. These are the non-scheduled ones (RBI's own
+ * classification); a bank whose name contains one of these words is
+ * reported as Non-Scheduled, all others as (Scheduled) State Co-operative
+ * Banks. Edit this list if RBI's classification changes - the run log
+ * warns when a word here matches no bank on the page.
+ */
+export const NON_SCHEDULED_STATE_COOP_KEYWORDS = [
+  "Andaman",
+  "Arunachal",
+  "Assam",
+  "Chandigarh",
+  "Daman",
+  "Jammu",
+  "Jharkhand",
+  "Manipur",
+  "Mizoram",
+  "Nagaland",
+];
+
 export const sources = [
   {
     key: "rbi_nbfc",
@@ -150,14 +171,12 @@ export const sources = [
     categoryAsPerRegulator: "Local Area Banks (LAB)",
     regulator: "RBI",
     url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
-    fileUrl: "https://www.rbi.org.in/commonman/Upload/English/Content/PDFs/LAB01112021.pdf",
-    type: "pdf_link",
+    type: "rbi_banks_custom",
+    bankSection: "lab",
     notes:
-      "The Banks page has no distinct clean LAB list (confirmed empty in a " +
-      "real run) - found this direct RBI-hosted PDF instead via search. " +
-      "There are only ~2 LABs in India and this list rarely changes, so a " +
-      "PDF that's a few years old is still very likely current, but worth " +
-      "a periodic manual spot-check given its age.",
+      "Now read from RBI's Banks page itself (every LAB name contains 'Local Area " +
+      "Bank'). The previous source, LAB01112021.pdf, is a 2021 document and " +
+      "produced the wrong banks.",
   },
   {
     key: "rbi_bank_sfb",
@@ -215,14 +234,14 @@ export const sources = [
     categoryAsPerRegulator: "State Co-operative Banks",
     regulator: "RBI",
     url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
-    fileUrl: "https://rbidocs.rbi.org.in/rdocs/Content/pdfs/SCCB20141702.pdf",
-    type: "pdf_link",
+    type: "rbi_state_coop_custom",
+    coopScope: "scheduled",
+    nonScheduledKeywords: NON_SCHEDULED_STATE_COOP_KEYWORDS,
     notes:
-      "The BanksInIndia.aspx page itself has no clean per-entity list for " +
-      "this (confirmed - it's name+address prose per state). Found this " +
-      "direct RBI PDF (26 Scheduled State Co-operative Banks) via search " +
-      "instead. PDF text extraction may mix address lines into names - " +
-      "verify manually against the source PDF.",
+      "RBI's Banks page lists ALL State Co-operative Banks in one numbered block " +
+      "(34 entries, scheduled and non-scheduled together). The block is read from " +
+      "the page and split using nonScheduledKeywords. The previous source, a 2014 " +
+      "PDF, was out of date.",
   },
   {
     key: "rbi_bank_scheduled_urban_coop",
@@ -250,8 +269,10 @@ export const sources = [
     categoryAsPerRegulator: "Non-Scheduled State Co-operative Banks",
     regulator: "RBI",
     url: "https://rbi.org.in/commonman/English/Scripts/BanksInIndia.aspx",
-    type: "manual",
-    notes: "Could not find a distinct, confirmed real source specifically for this sub-category (separate from the Non-Scheduled Urban PDF above) - flagged rather than guessed.",
+    type: "rbi_state_coop_custom",
+    coopScope: "non_scheduled",
+    nonScheduledKeywords: NON_SCHEDULED_STATE_COOP_KEYWORDS,
+    notes: "Same State Co-operative Banks block as rbi_bank_state_coop; this entry takes the non-scheduled banks.",
   },
 
   {
@@ -301,6 +322,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=7",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "credit\\s+rating",
   },
   {
     key: "sebi_venture_capital",
@@ -309,6 +331,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=21",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "^venture\\s+capital",
   },
   {
     key: "sebi_foreign_vc",
@@ -317,6 +340,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=25",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "foreign\\s+venture",
   },
   {
     key: "sebi_investment_adviser",
@@ -325,6 +349,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=13",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "investment\\s+advis",
   },
   {
     key: "sebi_broker_equity",
@@ -381,6 +406,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=33",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "portfolio\\s+manager",
   },
   {
     key: "sebi_mutual_funds",
@@ -389,6 +415,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=23",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "mutual\\s+fund",
   },
   {
     key: "sebi_dp_cdsl",
@@ -397,6 +424,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=18",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "cdsl",
   },
   {
     key: "sebi_dp_nsdl",
@@ -405,6 +433,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=19",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "nsdl",
   },
   {
     key: "sebi_merchant_bankers",
@@ -413,6 +442,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=9",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "merchant\\s+banker",
   },
   {
     key: "sebi_debenture_trustee",
@@ -421,6 +451,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=6",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "debenture\\s+trustee",
   },
   {
     key: "sebi_custodians",
@@ -429,6 +460,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=27",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "custodian",
   },
   {
     key: "sebi_share_transfer_agent",
@@ -437,6 +469,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=10",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "(share\\s+transfer|registrar)",
   },
   {
     key: "sebi_banker_to_issue",
@@ -445,6 +478,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=5",
     type: "sebi_intermediary_custom",
+    hubLabelHint: "banker.*issue",
   },
 
   {
@@ -455,14 +489,18 @@ export const sources = [
     url: "https://www.pfrda.org.in/web/pfrda/intermediaries/registered-intermediaries/pension-funds",
     type: "aspx_dynamic",
     tableSelector: "table",
+    // The page carries several tables (other NPS intermediaries). Only a table
+    // whose header mentions "Pension Fund" is the pension-fund list, and every
+    // name must itself look like a pension fund company.
+    tableHeaderPattern: "pension\\s+fund",
+    nameKeywordFilter: "pension|retirement",
+    // One cell can hold two companies on separate lines
+    // ("Kotak Mahindra Pension Fund Limited / Aditya Birla Sun Life Pension Management Limited").
+    splitCombinedNames: true,
     notes:
-      "PFRDA migrated their entire site to a new CMS - the old " +
-      "index1.cshtml?lsid=191 URL is stale, confirmed by web search: the " +
-      "genuinely current page is this one. Could not directly inspect its " +
-      "exact markup (my search/fetch tooling is blocked by this domain's " +
-      "robots.txt), so this points at the right URL but the extraction " +
-      "approach is still a best guess - check run-log.json after the next " +
-      "run and adjust tableSelector if it still returns empty.",
+      "Previous version read EVERY table on the page and so picked up the wrong " +
+      "one. The page's raw text/HTML is saved to output/diagnostics/ on every " +
+      "run so the selection can be checked.",
   },
 
   {

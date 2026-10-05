@@ -50,6 +50,7 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
   if (statusReconciliation) {
     writeFinalStatusSheet(wb, statusReconciliation);
     writeStatusChangeLogSheet(wb, statusReconciliation);
+    writePressReleaseSummarySheet(wb, statusReconciliation);
     writeUnmatchedSheet(wb, statusReconciliation);
   }
 
@@ -134,6 +135,8 @@ function writeStatusChangeLogSheet(wb, { merged, unattributedDeltas }) {
     { header: "Link", key: "prLink", width: 60 },
     { header: "Needs Manual Verification", key: "flag", width: 24 },
     { header: "Note", key: "note", width: 60 },
+    { header: "Name as written in Press Release", key: "prName", width: 50 },
+    { header: "Match Type", key: "matchType", width: 60 },
   ];
   sheet.getRow(1).font = { bold: true };
 
@@ -147,6 +150,8 @@ function writeStatusChangeLogSheet(wb, { merged, unattributedDeltas }) {
         prLink: h.prLink,
         flag: "Yes - verify against source press release",
         note: h.note || "",
+        prName: h.prName || "",
+        matchType: h.matchType || "",
       });
       // Count-mismatch notes (e.g. "title states 59, only 36 extracted")
       // get a strong visual flag - this is the single most actionable
@@ -169,7 +174,51 @@ function writeStatusChangeLogSheet(wb, { merged, unattributedDeltas }) {
       note: "",
     });
   }
-  sheet.autoFilter = { from: "A1", to: "G1" };
+  sheet.autoFilter = { from: "A1", to: "I1" };
+}
+
+/**
+ * One row per press release: how many entities its title says it covers,
+ * how many were extracted, and where each one ended up. "Matched" +
+ * "Not in master list" always equals "Extracted", so any gap between
+ * "Expected" and "Extracted" is a genuine extraction shortfall, while a
+ * large "Not in master list" means the company simply isn't in RBI's
+ * active/cancelled list (see the Unmatched PR Mentions sheet).
+ */
+function writePressReleaseSummarySheet(wb, { releaseSummary = [] }) {
+  const sheet = wb.addWorksheet("Press Release Summary");
+  sheet.columns = [
+    { header: "Press Release", key: "prTitle", width: 60 },
+    { header: "Action", key: "action", width: 14 },
+    { header: "Effective Date", key: "effectiveDate", width: 16 },
+    { header: "Expected (from title)", key: "expectedCount", width: 20 },
+    { header: "Extracted", key: "extracted", width: 12 },
+    { header: "Matched to Master List", key: "matched", width: 22 },
+    { header: "  of which exact", key: "exact", width: 16 },
+    { header: "  of which normalised", key: "normalised", width: 20 },
+    { header: "  of which alias", key: "alias", width: 16 },
+    { header: "  of which approximate", key: "approximate", width: 20 },
+    { header: "Not in Master List", key: "notInMaster", width: 18 },
+    { header: "Extraction complete?", key: "complete", width: 20 },
+    { header: "Link", key: "prLink", width: 60 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  for (const r of releaseSummary) {
+    const complete =
+      r.expectedCount == null ? "n/a (no count in title)" : r.extracted === r.expectedCount ? "Yes" : `No (${r.extracted} of ${r.expectedCount})`;
+    const row = sheet.addRow({
+      ...r,
+      expectedCount: r.expectedCount ?? "",
+      matched: r.exact + r.normalised + r.alias + r.approximate,
+      complete,
+    });
+    if (r.expectedCount != null && r.extracted !== r.expectedCount) {
+      row.eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFCE4E4" } };
+      });
+    }
+  }
+  sheet.autoFilter = { from: "A1", to: "M1" };
 }
 
 /** Entities mentioned in a press release status-change but not found in the

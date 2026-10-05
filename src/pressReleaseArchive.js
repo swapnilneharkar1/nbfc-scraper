@@ -28,6 +28,8 @@
  * click targets differ from what's assumed here.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import axios from "axios";
 import * as cheerio from "cheerio";
 
@@ -175,10 +177,55 @@ function parseListingHtml(html) {
   return entries;
 }
 
+const NUMBER_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20,
+};
+
+/**
+ * RBI's bulk-notice titles state how many entities the release covers:
+ * "... of 59 NBFCs", "13 NBFCs surrender ...", "Four NBFCs surrender ...",
+ * "... of one NBFC". Digits and number words are both handled (the
+ * previous digit-only pattern gave no expected count for "Four NBFCs").
+ */
+export function expectedCountFromTitle(title) {
+  const m = String(title || "").match(
+    /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s+(?:NBFCs?|non-banking|HFCs?|ARCs?)\b/i
+  );
+  if (!m) return null;
+  const raw = m[1].toLowerCase();
+  return /^\d+$/.test(raw) ? parseInt(raw, 10) : NUMBER_WORDS[raw] ?? null;
+}
+
 function htmlToText(html) {
   const $ = cheerio.load(html);
+  // Separate block-level elements with a space so text from adjacent
+  // cells/paragraphs is never glued together ("Limited" + "Sr. No." ->
+  // "LimitedSr. No."), which breaks name cut-offs downstream.
+  $("br,p,div,tr,td,th,li,table,h1,h2,h3,h4,h5,h6").after(" ");
   return $.root().text().replace(/\s+/g, " ").trim();
 }
+
+const HEADER_OR_LABEL_TEXT =
+  /^(sr\.?\s*no|s\.?\s*no|sl\.?\s*no|name(\s+of\s+(the\s+)?(company|companies|nbfc|nbfcs|entity|entities))?|registered\s+office(\s+address)?|address|cor\s*no|certificate\s+of\s+registration|date)\b/i;
+
+/**
+ * Last line of defence for table-extracted names: rejects header labels
+ * ("Registered Office Address"), pure numbers/serials, dates and postal
+ * addresses (a 6-digit PIN code) that a mis-aligned column can let through.
+ * Real company names pass untouched.
+ */
+function acceptableCompanyName(name) {
+  const n = String(name || "").trim();
+  if (n.length < 3 || n.length > 180) return false;
+  if (HEADER_OR_LABEL_TEXT.test(n)) return false;
+  if (/^[\d\s./-]+$/.test(n)) return false; // serial no / CoR no / date
+  if (/\b\d{6}\b/.test(n) || /\bpin\s*code\b/i.test(n)) return false; // postal address
+  return true;
+}
+
+const LEGAL_FORM_END = /\b(Limited|Ltd\.?|Pvt\.?|Private|LLP|Company|Co\.|Corporation|Corp\.?|Inc\.?)\)?\s*$/i;
 
 function looksLikeEntityName(candidate) {
   const c = candidate.trim();
@@ -300,7 +347,7 @@ function extractFromTable(html) {
 
       for (const row of dataRows) {
         const name = (row[nameIdx] || "").trim();
-        if (name && !isHeaderLikeText(name) && name.length <= 180) names.push(name);
+        if (name && !isHeaderLikeText(name) && acceptableCompanyName(name)) names.push(name);
       }
 
       lastGoodSchema = { nameIdx, columnCount: headerRow.length };
@@ -324,7 +371,7 @@ function extractFromTable(html) {
     console.log(`    (treating headerless table ${t + 1}/${tables.length} as a continuation of the previous table)`);
     for (const row of rows) {
       const name = (row[lastGoodSchema.nameIdx] || "").trim();
-      if (name && !isHeaderLikeText(name) && name.length <= 180) names.push(name);
+      if (name && !isHeaderLikeText(name) && acceptableCompanyName(name)) names.push(name);
     }
   }
 
@@ -364,10 +411,44 @@ function extractFromProseList(plainText) {
  * how RBI's bulk cancellation notices are built), falls back to the
  * prose-list format for smaller/differently-worded releases.
  */
-function extractEntityNames(html) {
+export function extractEntityNames(html, expectedCount = null) {
   const fromTable = extractFromTable(html);
-  if (fromTable.length > 0) return fromTable;
-  return extractFromProseList(htmlToText(html));
+  if (fromTable.length === 0) return extractFromProseList(htmlToText(html));
+
+  // The title says how many entities the release covers. If the table gave
+  // fewer, some entities may be listed in prose instead (or in a second
+  // table with a different layout) - top up from the prose list, keeping
+  // only candidates that end in a legal-form word so addresses and
+  // sentences can't sneak in, and never adding a name twice.
+  if (expectedCount && fromTable.length < expectedCount) {
+    const seen = new Set(fromTable.map((n) => n.toUpperCase().replace(/[^A-Z0-9]/g, "")));
+    const topUp = [];
+    for (const cand of extractFromProseList(htmlToText(html))) {
+      const k = cand.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (seen.has(k) || !LEGAL_FORM_END.test(cand) || !acceptableCompanyName(cand)) continue;
+      seen.add(k);
+      topUp.push(cand);
+    }
+    if (topUp.length > 0) {
+      console.log(`    table gave ${fromTable.length} of ${expectedCount}; added ${topUp.length} more name(s) found in the page text.`);
+      return [...fromTable, ...topUp];
+    }
+  }
+  return fromTable;
+}
+
+/** Saves a release page that did not extract cleanly so the next run's
+ * output can be inspected without guessing (GitHub Actions uploads this
+ * folder - see the workflow). */
+function saveDiagnostic(link, html) {
+  try {
+    const dir = path.resolve("output", "diagnostics");
+    fs.mkdirSync(dir, { recursive: true });
+    const id = (String(link).match(/prid=(\d+)/i) || [])[1] || String(Date.now());
+    fs.writeFileSync(path.join(dir, `press-release-${id}.html`), html);
+  } catch {
+    /* diagnostics are best-effort only */
+  }
 }
 
 /**
@@ -412,7 +493,11 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
             headers: { "User-Agent": USER_AGENT },
             timeout: 20000,
           });
-          names = extractEntityNames(releaseHtml);
+          names = extractEntityNames(releaseHtml, expectedCountFromTitle(entry.title));
+          {
+            const exp = expectedCountFromTitle(entry.title);
+            if (exp !== null && names.length !== exp) saveDiagnostic(entry.link, releaseHtml);
+          }
           // Diagnostic: this pipeline found 425 candidate mentions in a
           // real run but 0 matched the master list, despite roughly
           // correct row COUNTS - meaning either the extracted "names" are
@@ -439,12 +524,7 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
         // silently passing as if it were complete - flagged directly on
         // every row from this release so it's visible in the output sheet,
         // not just a console log that scrolls by during the Actions run.
-        const titleCountMatch = entry.title.match(
-          /\b(\d+)\s+NBFCs?\b|of\s+(\d+)\s+NBFCs?\b/i
-        );
-        const expectedCount = titleCountMatch
-          ? parseInt(titleCountMatch[1] || titleCountMatch[2], 10)
-          : null;
+        const expectedCount = expectedCountFromTitle(entry.title);
         const countMismatch =
           expectedCount !== null && names.length > 0 && names.length !== expectedCount;
         const countNote = countMismatch
@@ -460,6 +540,7 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
             prTitle: entry.title,
             prLink: entry.link,
             needsVerification: true,
+            expectedCount,
             note: "Could not auto-extract entity names from this press release - check it manually.",
           });
         } else {
@@ -471,6 +552,7 @@ export async function fetchNbfcStatusDeltasFromArchive(sinceDate, browser) {
               prTitle: entry.title,
               prLink: entry.link,
               needsVerification: true,
+              expectedCount,
               note: countNote,
             });
           }

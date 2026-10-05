@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/scraper.js",
   "scripts": {
-    "scrape": "node src/scraper.js"
+    "scrape": "node src/scraper.js",
+    "test": "node tests/sebi.test.mjs"
   },
   "dependencies": {
     "axios": "^1.20.0",

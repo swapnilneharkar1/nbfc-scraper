@@ -136,3 +136,20 @@ flag, not just a name.
 - **Points 7-9** weren't in the document you pasted (looks like they were skipped in the copy) - if they exist, send them and I'll fold them in.
 - A few Annex-1 rows are marked `manual` in `sources.js` with a `notes` field explaining exactly why (State/Co-op banks, IRDAI Non-Life/Reinsurers/CA-Insurer since their real URLs differ from what Annex-1 lists, AMFI, RBI "Financial Institutions in India"). These are flagged, not silently dropped or faked.
 - The RBI Banks/PSS custom parsers are tested against realistic synthetic HTML matching the page's confirmed real structure, but haven't been run against the live page end-to-end (my sandbox can't reach rbi.org.in directly) - treat your first live run as a calibration run, same as the rest of this project.
+
+
+## Observation-fix round (PSS, LAB, SFB, foreign banks, State Co-op, IRDAI, PFRDA, SEBI, press releases)
+
+Existing behaviour was kept; changes are additive.
+
+- **PSS**: names are cut at the legal form, so authorisation/ceased text no longer leaks into names (Ceased now 11). Operating no longer capped by a 20,000-char window.
+- **LAB / SFB**: LABs come from the page; "Slice Small Finance Bank Limited" is captured.
+- **Foreign banks**: address text trimmed from names; over-count removed. Heuristic - check `output/diagnostics/` if a name still carries an address.
+- **State Co-op / Non-Scheduled State Co-op**: both are read from the single RBI list and split by scope.
+- **IRDAI**: the English name column is used; Marathi/Devanagari text is stripped.
+- **PFRDA**: only the Pension Fund table is read; two-company cells are split.
+- **SEBI**: exact `intmId` matching (id 2 no longer matches 21/25/27); each source's id is checked against the hub page label (`hubLabelHint`); if the Download file is under 97% of the hub count, pagination tops it up. Run-log shows hub label, intmId used, expected vs got.
+- **Press releases**: headers/serial numbers/PINs are rejected as names; count words ("Four") are read; table rows are topped up from prose; mismatches save the page to `output/diagnostics/press-release-<id>.html`. New "Press Release Summary" sheet and a "Match Type" column (Exact / Normalised / Alias / Approximate).
+
+### Diagnostics
+Every run uploads `output/diagnostics/**` with the artifact. If a count still differs from the portal, send that folder plus `run-log.json`.

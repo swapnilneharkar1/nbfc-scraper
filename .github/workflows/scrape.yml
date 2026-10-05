@@ -45,6 +45,7 @@ jobs:
           path: |
             output/Combine_List_Output.xlsx
             output/run-log.json
+            output/diagnostics/**
           retention-days: 90
 
       # Option B (optional): commit the fresh Excel file straight into the

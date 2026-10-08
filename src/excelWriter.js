@@ -6,7 +6,7 @@ import ExcelJS from "exceljs";
  * Name | Category (as per Regulator) | Classification | Institution
  * plus an audit trail of every category an entity actually belongs to.
  */
-export async function writeWorkbook(rows, outFile, statusReconciliation = null, multiCategoryEntities = []) {
+export async function writeWorkbook(rows, outFile, statusReconciliation = null, multiCategoryEntities = [], audit = null) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "nbfc-fii-scraper";
   wb.created = new Date();
@@ -45,6 +45,11 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
 
   if (multiCategoryEntities.length > 0) {
     writeMultiCategorySheet(wb, multiCategoryEntities);
+  }
+
+  if (audit && audit.rawHits) {
+    writeSourceReconciliationSheet(wb, audit.rawHits, audit.runLog || [], rows);
+    writeAllMembershipsSheet(wb, audit.rawHits, rows);
   }
 
   if (statusReconciliation) {
@@ -244,4 +249,100 @@ function writeUnmatchedSheet(wb, { unmatchedDeltas }) {
     });
   }
   sheet.autoFilter = { from: "A1", to: "E1" };
+}
+
+
+// Same key the Combine List uses to decide two rows are one entity.
+const entityKey = (name) => String(name).toUpperCase().replace(/[.,()]/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * "Source Reconciliation" - one row per scraped source, tying the portal's
+ * count to what ends up in the Combine List. The Combine List holds each
+ * entity ONCE, under its highest-priority category (BRD #5), so a source's
+ * share there is normally smaller than its scraped count; the difference is
+ * entities that are also in a higher-priority category (they are kept in
+ * "All Memberships" and "Multi-Category Entities") or repeated within the
+ * source itself.
+ */
+function writeSourceReconciliationSheet(wb, rawHits, runLog, resolvedRows) {
+  const winnerByKey = new Map(resolvedRows.map((r) => [entityKey(r.name), r.sourceKey]));
+  const perSource = new Map();
+  for (const h of rawHits) {
+    if (!perSource.has(h.sourceKey)) perSource.set(h.sourceKey, { keys: new Set(), wins: 0 });
+    const e = perSource.get(h.sourceKey);
+    const k = entityKey(h.name);
+    if (!e.keys.has(k)) {
+      e.keys.add(k);
+      if (winnerByKey.get(k) === h.sourceKey) e.wins++;
+    }
+  }
+
+  const sheet = wb.addWorksheet("Source Reconciliation");
+  sheet.columns = [
+    { header: "Source Key", key: "key", width: 34 },
+    { header: "Regulator", key: "regulator", width: 11 },
+    { header: "Category (as per Regulator)", key: "category", width: 38 },
+    { header: "Run Status", key: "status", width: 14 },
+    { header: "Portal Count (SEBI hub page)", key: "expected", width: 16 },
+    { header: "Scraped (this run)", key: "scraped", width: 14 },
+    { header: "Scraped minus Portal", key: "diff", width: 14 },
+    { header: "Unique Entities in Source", key: "unique", width: 16 },
+    { header: "Listed in Combine List under this category", key: "wins", width: 20 },
+    { header: "Held back (higher-priority category elsewhere)", key: "heldBack", width: 22 },
+    { header: "Note", key: "note", width: 90 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).alignment = { wrapText: true, vertical: "top" };
+  for (const r of runLog) {
+    const e = perSource.get(r.key) || { keys: new Set(), wins: 0 };
+    const diff = r.expectedCount != null ? r.count - r.expectedCount : "";
+    const row = sheet.addRow({
+      key: r.key,
+      regulator: r.regulator || "",
+      category: r.category || "",
+      status: r.status,
+      expected: r.expectedCount ?? "",
+      scraped: r.count,
+      diff,
+      unique: e.keys.size,
+      wins: e.wins,
+      heldBack: e.keys.size - e.wins,
+      note: [r.scrapeNote, r.error].filter(Boolean).join(" | "),
+    });
+    if (diff !== "" && diff < 0) row.getCell("diff").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFCE4D6" } };
+  }
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+}
+
+/**
+ * "All Memberships" - every (entity, category) pair that was scraped, one
+ * row each, before the priority matrix picks a single reporting category.
+ * Filtering this sheet by Category gives exactly the scraped count.
+ */
+function writeAllMembershipsSheet(wb, rawHits, resolvedRows) {
+  const winnerByKey = new Map(resolvedRows.map((r) => [entityKey(r.name), r.sourceKey]));
+  const sheet = wb.addWorksheet("All Memberships");
+  sheet.columns = [
+    { header: "Entity Name", key: "name", width: 55 },
+    { header: "Category (as per Regulator)", key: "category", width: 38 },
+    { header: "Regulator", key: "regulator", width: 11 },
+    { header: "Source Key", key: "sourceKey", width: 32 },
+    { header: "Reporting Category in Combine List?", key: "isFinal", width: 18 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  const seen = new Set();
+  for (const h of rawHits) {
+    const id = `${h.sourceKey}|${entityKey(h.name)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    sheet.addRow({
+      name: h.name,
+      category: h.categoryAsPerRegulator,
+      regulator: h.regulator,
+      sourceKey: h.sourceKey,
+      isFinal: winnerByKey.get(entityKey(h.name)) === h.sourceKey ? "Yes" : "No",
+    });
+  }
+  sheet.autoFilter = { from: "A1", to: "E1" };
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
 }

@@ -125,3 +125,46 @@ export function namesFromTables(tables, options = {}, log = () => {}) {
   }
   return names;
 }
+
+const FUND_LEGAL_END = /(?:limited|ltd\.?|private|pvt\.?(?:\s*limited|\s*ltd\.?)?|\(p\)\s*ltd\.?|company)\s*$/i;
+
+/**
+ * For pages that list companies as bullet points / plain lines rather than
+ * in a <table> (PFRDA's pension-fund page: the real list sits under a
+ * "List of Pension Funds" heading, while the page's only tables are fee and
+ * asset-allocation tables).
+ *
+ * Tier 1: lines directly under a heading matching `headingPattern`.
+ * Tier 2 (only if tier 1 finds nothing): every line on the page that looks
+ * like a company name matching `keywordPattern`.
+ * Returns { names, tier }.
+ */
+export function namesFromListLines(lines, { headingPattern, keywordPattern, stopPattern, maxSection = 40 }) {
+  const heading = new RegExp(headingPattern, "i");
+  const keyword = new RegExp(keywordPattern, "i");
+  const stop = stopPattern ? new RegExp(stopPattern, "i") : null;
+  const clean = lines.map((l) => String(l).replace(/^[\s•·*\-–]+/, "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const looksLikeName = (l) =>
+    l.length >= 8 && l.length <= 120 && keyword.test(l) && FUND_LEGAL_END.test(l) && !/[%₹]|\b(charges|fee|click|scheme)\b/i.test(l);
+  const uniq = (arr) => {
+    const seen = new Set();
+    return arr.filter((n) => {
+      const k = n.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+  // Tier 1 - the LAST heading match wins (the first is often a menu/TOC entry).
+  const starts = clean.map((l, i) => (heading.test(l) && l.length < 80 ? i : -1)).filter((i) => i >= 0);
+  for (const start of starts.reverse()) {
+    const section = [];
+    for (let i = start + 1; i < clean.length && section.length < maxSection; i++) {
+      if (stop && stop.test(clean[i])) break;
+      section.push(clean[i]);
+    }
+    const names = uniq(section.filter(looksLikeName));
+    if (names.length >= 3) return { names, tier: 1 };
+  }
+  return { names: uniq(clean.filter(looksLikeName)), tier: 2 };
+}

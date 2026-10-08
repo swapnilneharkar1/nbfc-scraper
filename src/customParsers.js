@@ -16,6 +16,7 @@
  */
 
 import * as cheerio from "cheerio";
+import { canonicalKey, splitAnnotations } from "./statusMerge.js";
 
 // ---------------------------------------------------------------------
 // SEBI "Recognised Intermediaries" pages
@@ -558,7 +559,10 @@ function looksLikeEntityName(candidate) {
 /** Name for one PSS entry: legal-form cut, else cut where payment/status text begins. */
 function pssNameFromEntry(entry) {
   const lines = entry.split("\n").map((l) => l.trim()).filter(Boolean);
-  const first = lines[0] || "";
+  // Table rows reach us tab-separated ("Bank of India<TAB>Bank of India, Mumbai"):
+  // the name is the first non-numeric cell, the rest is address / repeat.
+  const firstCell = (lines[0] || "").split("\t").map((c) => c.trim()).find((c) => c && !/^\d{1,3}[.)]?$/.test(c));
+  const first = firstCell || lines[0] || "";
   const byLegal = cutNameAtLegalForm(first) || (lines[1] ? cutNameAtLegalForm(`${first} ${lines[1]}`) : null);
   if (byLegal) return byLegal;
   const status = PAYMENT_STATUS_TEXT.exec(first);
@@ -599,5 +603,13 @@ export function parseRbiPssSection(html, pssSection, innerText = null) {
     .map(pssNameFromEntry)
     .filter(looksLikeEntityName);
 
-  return { names: [...new Set(names)], note: null };
+  // Same company listed twice under spelling variants (e.g. "Razorpay ... (formerly ...)"
+  // and plain, or "CSC e - Governance" / "CSC e-Governance") counts once; the
+  // longer, annotated spelling is kept.
+  const byKey = new Map();
+  for (const n of names) {
+    const k = canonicalKey(splitAnnotations(n).primary);
+    if (!byKey.has(k) || n.length > byKey.get(k).length) byKey.set(k, n);
+  }
+  return { names: [...byKey.values()], note: null };
 }

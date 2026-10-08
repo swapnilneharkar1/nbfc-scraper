@@ -221,6 +221,8 @@ function acceptableCompanyName(name) {
   if (n.length < 3 || n.length > 180) return false;
   if (HEADER_OR_LABEL_TEXT.test(n)) return false;
   if (/^[\d\s./-]+$/.test(n)) return false; // serial no / CoR no / date
+  if (/^(?:\d{1,2}[\s-])?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?[\s,-]*\d{0,2}[\s,-]*\d{2,4}$/i.test(n)) return false; // "31-Jul-26", "July 09,1998"
+  if (/\b(?:cancellation|restoration|surrender)\s+order\b|\b(?:cor|certificate)\s+(?:restored|issued|cancelled)\s+on\b|\bcor\s+no\b/i.test(n) && !LEGAL_FORM_END.test(n)) return false;
   if (/\b\d{6}\b/.test(n) || /\bpin\s*code\b/i.test(n)) return false; // postal address
   return true;
 }

@@ -25,11 +25,11 @@ import { sources } from "./sources.js";
 import { writeWorkbook } from "./excelWriter.js";
 import { fetchNbfcStatusDeltas } from "./pressReleases.js";
 import { fetchNbfcStatusDeltasFromArchive } from "./pressReleaseArchive.js";
-import { mergeStatuses, extractMasterListDate } from "./statusMerge.js";
+import { mergeStatuses, extractMasterListDate, canonicalKey } from "./statusMerge.js";
 import { parseRbiBanksSection, parseRbiPssSection, parseRbiStateCoop, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
 import { resolveSebiIntmId } from "./sebiUtils.js";
 import { getRank } from "./priorityMatrix.js";
-import { guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
+import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
 
 const OUTPUT_DIR = path.resolve("output");
 const DOWNLOAD_DIR = path.resolve("output", "downloads");
@@ -126,6 +126,13 @@ async function scrapeAspxDynamic(source, browser) {
 
     if (names.length > 0) return { names, titleText: null };
 
+    if (source.listFallback) {
+      const lines = await page.evaluate(() => (document.body ? document.body.innerText : "").split(/\n+/));
+      const { names: listNames, tier } = namesFromListLines(lines, source.listFallback);
+      console.log(`  no usable table - read ${listNames.length} name(s) from page lines (${tier === 1 ? "under the list heading" : "page-wide match"})`);
+      if (listNames.length > 0) return { names: listNames, titleText: null };
+    }
+
     // No usable table rendered - look for a downloadable list instead.
     const linkPattern = source.linkPattern || /(list|nbfc|hfc).*\.(pdf|xlsx?|csv)$/i;
     const links = await page.$$eval("a", (as) =>
@@ -205,7 +212,7 @@ async function parseXlsxBuffer(buffer, { captureClassification = false } = {}) {
   wb.worksheets.forEach((ws) => {
     const allRows = [];
     ws.eachRow((row) => {
-      const values = row.values.slice(1).map((v) => (v == null ? "" : String(v).trim()));
+      const values = row.values.slice(1).map((v) => cellText(v));
       if (values.some(Boolean)) allRows.push(values);
     });
 
@@ -337,6 +344,24 @@ function namesFromPdfText(text) {
     .filter((l) => !/^\d+$/.test(l));
 }
 
+/** Plain text of an ExcelJS cell value (rich text, hyperlink, formula result) - never "[object Object]". */
+function cellText(v) {
+  if (v == null) return "";
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "object") {
+    if (Array.isArray(v.richText)) return v.richText.map((t) => t.text || "").join("").trim();
+    if (v.text != null) return cellText(v.text);
+    if (v.result != null) return cellText(v.result);
+    if (v.hyperlink) return String(v.hyperlink).trim();
+    return "";
+  }
+  return String(v).trim();
+}
+
+/** Header/label text that is never an entity name, whatever source it leaks in from. */
+const NOT_AN_ENTITY_NAME =
+  /^(?:name\s+of\s+(?:the\s+)?(?:company|companies|insurer|entity|entities|nbfc|nbfcs|bank)s?|nbfc\s+name|classification|sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|list\s+of\s+.*\b(?:added|removed|deleted)\b.*|\[object Object\])$/i;
+
 function dedupe(names) {
   return [...new Set(names.map((n) => n.trim()).filter(Boolean))];
 }
@@ -404,6 +429,7 @@ async function run() {
       let status = "ok";
       let error = null;
       let scrapeNote = null;
+      let expectedForLog = null;
 
       try {
         if (source.type === "html_table") {
@@ -432,6 +458,7 @@ async function run() {
                 : source;
               const result = await scrapeSebiIntermediaryCustom(effectiveSource, sebiPage, resolved.expectedCount, sebiHubPage);
               names = result.names;
+              expectedForLog = resolved.expectedCount ?? null;
               scrapeNote = [
                 `hub label: ${resolved.hubLabel || "n/a"}`,
                 `intmId used: ${resolved.intmId || "n/a"}${resolved.changedFrom ? ` (configured ${resolved.changedFrom})` : ""}`,
@@ -455,6 +482,13 @@ async function run() {
         console.error(`  failed: ${err.message}`);
       }
 
+      {
+        const kept = names.filter((n) => !NOT_AN_ENTITY_NAME.test(String(n).trim()));
+        if (kept.length !== names.length) {
+          console.log(`  dropped ${names.length - kept.length} header/label row(s) that are not entity names`);
+          names = kept;
+        }
+      }
       if (names.length === 0 && status === "ok") status = "empty";
 
       for (const name of names) {
@@ -488,6 +522,9 @@ async function run() {
         url: source.url,
         status,
         count: names.length,
+        expectedCount: expectedForLog,
+        category: source.categoryAsPerRegulator,
+        regulator: source.regulator,
         ms: Date.now() - started,
         error,
         notes: source.notes || null,
@@ -520,7 +557,7 @@ async function run() {
   const { resolved, multiCategoryEntities } = resolveWithPriorityMatrix(rawHits);
 
   const outFile = path.join(OUTPUT_DIR, "Combine_List_Output.xlsx");
-  await writeWorkbook(resolved, outFile, statusReconciliation, multiCategoryEntities);
+  await writeWorkbook(resolved, outFile, statusReconciliation, multiCategoryEntities, { rawHits, runLog });
   fs.writeFileSync(RUN_LOG_PATH, JSON.stringify(runLog, null, 2));
 
   console.log(`\nWrote ${resolved.length} resolved entities -> ${outFile}`);
@@ -908,7 +945,21 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
   let html = await page.content();
   let { names, note } = parseSebiIntermediaryPage(html);
   if (note) console.warn(`  ${note}`);
-  let allNames = new Set([...downloadNames, ...names]);
+  // Union keyed on a canonical form so "XYZ Pvt Ltd" from the file and
+  // "XYZ Private Limited" from the page are one entity, not two.
+  const byKey = new Map();
+  const addName = (n) => {
+    const k = canonicalKey(n);
+    if (k && !byKey.has(k)) byKey.set(k, n);
+    return k;
+  };
+  downloadNames.forEach(addName);
+  // Names seen on the paginated pages themselves. The "no progress" stop
+  // below looks at THIS set, not the union - pages the Download file
+  // already covered add nothing to the union but are still real pages.
+  const pagedSeen = new Set();
+  for (const n of names) { pagedSeen.add(canonicalKey(n)); addName(n); }
+  const allNames = { get size() { return byKey.size; } };
 
   const target = expectedCount || null;
   if (target) console.log(`  target from hub page: ${target} records`);
@@ -947,18 +998,19 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
 
     html = await page.content();
     const result = parseSebiIntermediaryPage(html);
-    const before = allNames.size;
-    for (const n of result.names) allNames.add(n);
+    const pageKeys = result.names.map((n) => canonicalKey(n));
+    const newOnThisPage = pageKeys.filter((k) => k && !pagedSeen.has(k)).length;
+    for (const n of result.names) { pagedSeen.add(canonicalKey(n)); addName(n); }
 
-    if (allNames.size === before) {
-      console.warn(`  page ${pageNum + 1} produced no new names - stopping to avoid an infinite loop`);
+    if (newOnThisPage === 0) {
+      console.warn(`  page ${pageNum + 1} repeated names already seen on earlier pages - stopping to avoid an infinite loop`);
       break;
     }
 
     pageNum++;
   }
 
-  const finalNames = [...allNames];
+  const finalNames = [...byKey.values()];
   if (target && finalNames.length < target) {
     console.warn(
       `  WARNING: only got ${finalNames.length} of ${target} expected records for ${source.key} - incomplete, needs investigation.`

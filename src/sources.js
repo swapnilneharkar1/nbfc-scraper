@@ -331,7 +331,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=21",
     type: "sebi_intermediary_custom",
-    hubLabelHint: "^venture\\s+capital",
+    hubLabelHint: "venture\\s+capital\\s+fund",
   },
   {
     key: "sebi_foreign_vc",
@@ -451,7 +451,7 @@ export const sources = [
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=6",
     type: "sebi_intermediary_custom",
-    hubLabelHint: "debenture\\s+trustee",
+    hubLabelHint: "debentures?\\s+trustee",
   },
   {
     key: "sebi_custodians",
@@ -492,8 +492,16 @@ export const sources = [
     // The page carries several tables (other NPS intermediaries). Only a table
     // whose header mentions "Pension Fund" is the pension-fund list, and every
     // name must itself look like a pension fund company.
-    tableHeaderPattern: "pension\\s+fund",
+    // (The page's FIRST table is a fee-slab table whose header also says
+    // "Pension Fund" - hence the stricter pattern - and the real list is a
+    // bullet list under "List of Pension Funds", read via listFallback.)
+    tableHeaderPattern: "name\\s+of\\s+(the\\s+)?pension|pension\\s+fund\\s+(manager|name|company)",
     nameKeywordFilter: "pension|retirement",
+    listFallback: {
+      headingPattern: "^list\\s+of\\s+pension\\s+funds",
+      keywordPattern: "pension|retirement",
+      stopPattern: "^(public\\s+disclosures|schemes|return\\s+of|investment\\s+management|note)",
+    },
     // One cell can hold two companies on separate lines
     // ("Kotak Mahindra Pension Fund Limited / Aditya Birla Sun Life Pension Management Limited").
     splitCombinedNames: true,

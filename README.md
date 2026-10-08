@@ -153,3 +153,16 @@ Existing behaviour was kept; changes are additive.
 
 ### Diagnostics
 Every run uploads `output/diagnostics/**` with the artifact. If a count still differs from the portal, send that folder plus `run-log.json`.
+
+
+## Count reconciliation round (after the first live run)
+
+- **Why Excel counts were lower than scraper counts:** the Combine List lists each entity once, under its highest-priority category (BRD #5). New sheets explain every difference: **Source Reconciliation** (portal count, scraped, unique, shown in Combine List, held back per source) and **All Memberships** (every entity/category pair - filter by category to get the scraped count exactly).
+- **SEBI top-up bug:** after the Download file seeded the name set, pagination stopped as soon as a page added nothing new to the union. It now stops only when a page repeats pages already walked, and the union is keyed on a canonical name (Pvt Ltd = Private Limited).
+- **SEBI hub-label hints** for Venture Capital Funds and Debentures Trustee matched the wrong wording; corrected.
+- **Junk rows removed:** header/label rows ("NBFC Name", "Classification", "Name of the Company", "List of NBFCs added...") and "[object Object]" (rich-text cells) are no longer treated as entities.
+- **PFRDA:** the first table on the page is a fee-slab table whose header mentions "Pension Fund"; the real list is a bullet list under "List of Pension Funds". Table selection is stricter and the list is read as a fallback.
+- **PSS:** tab-joined table cells are cut to the name cell; spelling variants of the same company inside one list count once.
+- **Press releases:** dates ("July 09,1998", "31-Jul-26") and column labels ("CoR restored on", "Cancellation Order Date") are never accepted as company names.
+
+Run `npm test` for the offline checks.

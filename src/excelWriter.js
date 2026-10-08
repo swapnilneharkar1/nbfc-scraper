@@ -24,24 +24,34 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
     { header: "All Categories (audit)", key: "allCategories", width: 60 },
     { header: "Source Key", key: "sourceKey", width: 20 },
     { header: "Scraped At", key: "scrapedAt", width: 20 },
+    { header: "Final Reporting Row? (Priority Matrix)", key: "isFinal", width: 20 },
   ];
   sheet.getRow(1).font = { bold: true };
 
   const scrapedAt = new Date().toISOString();
-  for (const r of rows) {
+  // One row per (entity, category) membership, so filtering a category
+  // gives exactly the number scraped for it (BRD #6: all valid category
+  // relationships are retained). "Final Reporting Row?" = Yes marks the one
+  // row per entity chosen by the Priority Matrix (BRD #5); filter it to Yes
+  // for the de-duplicated entity list.
+  const outRows = audit && audit.rawHits ? membershipRows(rows, audit.rawHits) : rows.map((r) => ({ ...r, isFinal: "Yes" }));
+  for (const r of outRows) {
     const row = sheet.addRow({
       ...r,
       multipleCategories: r.categoryCount > 1 ? "Yes" : "No",
       scrapedAt,
     });
-    if (r.categoryCount > 1) {
+    if (r.isFinal === "No") {
+      row.eachCell((cell) => { cell.font = { color: { argb: "FF7F7F7F" } }; });
+    } else if (r.categoryCount > 1) {
       row.eachCell((cell) => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2EFDA" } };
       });
     }
   }
 
-  sheet.autoFilter = { from: "A1", to: "K1" };
+  sheet.autoFilter = { from: "A1", to: "L1" };
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   if (multiCategoryEntities.length > 0) {
     writeMultiCategorySheet(wb, multiCategoryEntities);
@@ -49,7 +59,6 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
 
   if (audit && audit.rawHits) {
     writeSourceReconciliationSheet(wb, audit.rawHits, audit.runLog || [], rows);
-    writeAllMembershipsSheet(wb, audit.rawHits, rows);
   }
 
   if (statusReconciliation) {
@@ -287,8 +296,8 @@ function writeSourceReconciliationSheet(wb, rawHits, runLog, resolvedRows) {
     { header: "Scraped (this run)", key: "scraped", width: 14 },
     { header: "Scraped minus Portal", key: "diff", width: 14 },
     { header: "Unique Entities in Source", key: "unique", width: 16 },
-    { header: "Listed in Combine List under this category", key: "wins", width: 20 },
-    { header: "Held back (higher-priority category elsewhere)", key: "heldBack", width: 22 },
+    { header: "Rows in Combine List for this category (should equal Unique)", key: "wins", width: 20 },
+    { header: "Of which marked Final Reporting Row = No (higher-priority category elsewhere)", key: "heldBack", width: 26 },
     { header: "Note", key: "note", width: 90 },
   ];
   sheet.getRow(1).font = { bold: true };
@@ -305,7 +314,7 @@ function writeSourceReconciliationSheet(wb, rawHits, runLog, resolvedRows) {
       scraped: r.count,
       diff,
       unique: e.keys.size,
-      wins: e.wins,
+      wins: e.keys.size,
       heldBack: e.keys.size - e.wins,
       note: [r.scrapeNote, r.error].filter(Boolean).join(" | "),
     });
@@ -345,4 +354,33 @@ function writeAllMembershipsSheet(wb, rawHits, resolvedRows) {
   }
   sheet.autoFilter = { from: "A1", to: "E1" };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
+}
+
+
+/** Expands the priority-resolved rows into one row per (entity, source) membership. */
+export function membershipRows(resolvedRows, rawHits) {
+  const byKey = new Map(resolvedRows.map((r) => [entityKey(r.name), r]));
+  const seen = new Set();
+  const out = [];
+  for (const h of rawHits) {
+    const k = entityKey(h.name);
+    const id = `${h.sourceKey}|${k}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const r = byKey.get(k);
+    out.push({
+      name: h.name,
+      category: h.categoryAsPerRegulator,
+      categoryAsPerReturn: h.categoryAsPerReturn,
+      classification: h.categoryAsPerRegulator,
+      institution: h.categoryAsPerReturn,
+      regulator: h.regulator,
+      status: h.status,
+      allCategories: r ? r.allCategories : h.categoryAsPerRegulator,
+      categoryCount: r ? r.categoryCount : 1,
+      sourceKey: h.sourceKey,
+      isFinal: r && r.sourceKey === h.sourceKey ? "Yes" : "No",
+    });
+  }
+  return out;
 }

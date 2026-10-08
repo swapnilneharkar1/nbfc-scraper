@@ -465,6 +465,9 @@ async function run() {
                 `expected: ${resolved.expectedCount ?? "unknown"}`,
                 `got: ${names.length}`,
                 result.via ? `via: ${result.via}` : null,
+                result.downloadStats
+                  ? `download file rows: ${result.downloadStats.dataRows}, distinct names: ${result.downloadStats.uniqueNames}, blank: ${result.downloadStats.blankName}`
+                  : null,
                 resolved.warning,
               ].filter(Boolean).join("; ");
             } finally {
@@ -808,7 +811,12 @@ async function tryDownloadFromHub(hubPage, intmId, expectedCount = null) {
 }
 
 /** Parses whatever file tryDownloadFromHub captured, based on its extension. */
+// Row-level facts about the last parsed SEBI download (rows in the file vs
+// distinct names), so a gap against SEBI's own count can be explained.
+let lastDownloadStats = null;
+
 async function parseSebiDownloadedFile(filePath) {
+  lastDownloadStats = null;
   const buffer = fs.readFileSync(filePath);
   const head = buffer.slice(0, 1024).toString("utf8", 0, Math.min(1024, buffer.length));
   const headBytes = buffer.slice(0, 8);
@@ -867,6 +875,7 @@ async function parseSebiDownloadedFile(filePath) {
     console.log(`  downloaded file is old binary .xls - parsing with SheetJS.`);
     const wb = XLSX.read(buffer, { type: "buffer" });
     const names = [];
+    const stats = { dataRows: 0, blankName: 0, serialLabel: 0, tooLong: 0, uniqueNames: 0 };
     for (const sheetName of wb.SheetNames) {
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
       const nonEmptyRows = rows.map((r) => r.map((c) => String(c ?? "").trim())).filter((r) => r.some(Boolean));
@@ -874,13 +883,19 @@ async function parseSebiDownloadedFile(filePath) {
       if (headerIdx === -1) continue;
       const nameIdx = guessNameColumnIndex(nonEmptyRows[headerIdx]);
       for (let i = headerIdx + 1; i < nonEmptyRows.length; i++) {
+        stats.dataRows++;
         const name = (nonEmptyRows[i][nameIdx] || "").trim();
-        if (name && !/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name) && name.length <= 180) {
-          names.push(name);
-        }
+        if (!name) { stats.blankName++; continue; }
+        if (/^(sl\.?\s*no\.?|s\.?\s*no\.?)$/i.test(name)) { stats.serialLabel++; continue; }
+        if (name.length > 180) { stats.tooLong++; continue; }
+        names.push(name);
       }
     }
-    return dedupe(names);
+    const unique = dedupe(names);
+    stats.uniqueNames = unique.length;
+    lastDownloadStats = stats;
+    console.log(`  download file: ${stats.dataRows} data row(s), ${unique.length} distinct name(s), ${stats.blankName} blank, ${stats.tooLong} over-long, ${names.length - unique.length} repeated name(s)`);
+    return unique;
   }
 
   // CSV as a last resort, since it has no reliable magic-byte signature -
@@ -914,6 +929,7 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
   // If the file is short of SEBI's own hub count, its names seed the
   // pagination walk below and the union is returned.
   let downloadNames = [];
+  let downloadStats = null;
   let via = "pagination";
   if (hubPage) {
     const intmIdMatch = source.url.match(/intmId=(\d+)/);
@@ -922,10 +938,11 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
         const downloadedFile = await tryDownloadFromHub(hubPage, intmIdMatch[1], expectedCount);
         if (downloadedFile) {
           downloadNames = await parseSebiDownloadedFile(downloadedFile);
+          downloadStats = lastDownloadStats;
           if (downloadNames.length > 0) {
             console.log(`  got ${downloadNames.length} names via Download button (${path.basename(downloadedFile)})`);
-            if (!expectedCount || downloadNames.length >= Math.floor(expectedCount * 0.97)) {
-              return { names: downloadNames, via: "download" };
+            if (!expectedCount || downloadNames.length >= expectedCount) {
+              return { names: downloadNames, via: "download", downloadStats };
             }
             console.warn(`  downloaded file has ${downloadNames.length}, expected ${expectedCount} - topping up via pagination.`);
           } else {
@@ -964,51 +981,76 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
   const target = expectedCount || null;
   if (target) console.log(`  target from hub page: ${target} records`);
 
-  const MAX_PAGES = 260; // covers the largest known category (~4994 / 25 ≈ 200 pages) with headroom
+  // A page's "signature" (first / last name + row count) is how we know a
+  // click has really loaded different content. A fixed wait after the click
+  // was the cause of pagination "repeating" a page and stopping early.
+  const signatureOf = (htmlText) => {
+    const r = parseSebiIntermediaryPage(htmlText).names;
+    return r.length ? `${r[0]}|${r[r.length - 1]}|${r.length}` : "";
+  };
+  const clickNext = (currentPageNum) =>
+    page.evaluate((cur) => {
+      const nextPageLabel = String(cur + 1);
+      const links = Array.from(document.querySelectorAll("a"));
+      const txt = (a) => a.textContent.trim();
+      // Order matters: the exact next page number, then a plain "Next" /
+      // ">" control, and only last a jump-style "»" / ">>" (which can mean
+      // "last page" on some pagers).
+      const numbered = links.find((a) => txt(a) === nextPageLabel);
+      const plainNext = links.find((a) => /^(next|>|›)$/i.test(txt(a)));
+      const jumpNext = links.find((a) => /^(»|>>)$/.test(txt(a)));
+      const el = numbered || plainNext || jumpNext;
+      if (el) { el.click(); return true; }
+      return false;
+    }, currentPageNum);
+  const waitForNewPage = async (prevSig, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const h = await page.content();
+      const sg = signatureOf(h);
+      if (sg && sg !== prevSig) return h;
+    }
+    return null;
+  };
+
+  const MAX_PAGES = 260; // covers the largest known category (~5000 / 25 = 200 pages) with headroom
   let pageNum = 1;
+  let prevSig = signatureOf(html);
+  const sigsSeen = new Set([prevSig]);
+  let noNewStreak = 0;
+  let stopReason = null;
 
   while (!target || allNames.size < target) {
-    if (pageNum >= MAX_PAGES) {
-      console.warn(`  hit safety cap of ${MAX_PAGES} pages - stopping early`);
-      break;
+    if (pageNum >= MAX_PAGES) { stopReason = `hit safety cap of ${MAX_PAGES} pages`; break; }
+
+    if (!(await clickNext(pageNum))) { stopReason = `no page-${pageNum + 1} / Next control found`; break; }
+    let newHtml = await waitForNewPage(prevSig, 15000);
+    if (!newHtml) {
+      // One retry: the click may have been swallowed while the page re-rendered.
+      await clickNext(pageNum);
+      newHtml = await waitForNewPage(prevSig, 10000);
     }
+    if (!newHtml) { stopReason = `page ${pageNum + 1} never loaded different content`; break; }
 
-    const nextClicked = await page.evaluate((currentPageNum) => {
-      const nextPageLabel = String(currentPageNum + 1);
-      const candidates = Array.from(document.querySelectorAll("a"));
-      // Try, in order: a link literally labeled with the next page number,
-      // then a "Next"/"»" style link. Whichever exists first wins.
-      const numbered = candidates.find((a) => a.textContent.trim() === nextPageLabel);
-      const nextLink = candidates.find((a) => /^(next|»|>>|>)$/i.test(a.textContent.trim()));
-      const target = numbered || nextLink;
-      if (target) {
-        target.click();
-        return true;
-      }
-      return false;
-    }, pageNum);
+    html = newHtml;
+    const sg = signatureOf(html);
+    if (sigsSeen.has(sg)) { stopReason = `page ${pageNum + 1} is identical to an earlier page (pager looped)`; break; }
+    sigsSeen.add(sg);
+    prevSig = sg;
 
-    if (!nextClicked) {
-      console.log(`  no further page-${pageNum + 1} control found - stopping (got ${allNames.size} of ${target || "unknown"})`);
-      break;
-    }
-
-    await page.waitForNetworkIdle({ idleTime: 800, timeout: 15000 }).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    html = await page.content();
     const result = parseSebiIntermediaryPage(html);
-    const pageKeys = result.names.map((n) => canonicalKey(n));
-    const newOnThisPage = pageKeys.filter((k) => k && !pagedSeen.has(k)).length;
+    const newOnThisPage = result.names.filter((n) => { const k = canonicalKey(n); return k && !pagedSeen.has(k); }).length;
     for (const n of result.names) { pagedSeen.add(canonicalKey(n)); addName(n); }
 
-    if (newOnThisPage === 0) {
-      console.warn(`  page ${pageNum + 1} repeated names already seen on earlier pages - stopping to avoid an infinite loop`);
-      break;
-    }
+    // Pages made only of names seen before (a broker listed several times)
+    // are tolerated; three in a row means the walk has run out of data.
+    noNewStreak = newOnThisPage === 0 ? noNewStreak + 1 : 0;
+    if (noNewStreak >= 3) { stopReason = `3 consecutive pages without a new name (page ${pageNum + 1})`; break; }
 
     pageNum++;
   }
+  if (stopReason) console.log(`  pagination stopped: ${stopReason}; walked ${pageNum} page(s)`);
 
   const finalNames = [...byKey.values()];
   if (target && finalNames.length < target) {
@@ -1019,7 +1061,7 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
     console.log(`  reached full expected count: ${finalNames.length}/${target}`);
   }
 
-  return { names: finalNames, via: downloadNames.length ? "download+pagination" : "pagination" };
+  return { names: finalNames, via: downloadNames.length ? "download+pagination" : "pagination", downloadStats };
 }
 
 /**

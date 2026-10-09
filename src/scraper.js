@@ -358,6 +358,11 @@ function cellText(v) {
   return String(v).trim();
 }
 
+/** Strips leading punctuation / slash filler (". . . . . / NAME" -> "NAME"). */
+function cleanLeadingJunk(name) {
+  return String(name ?? "").replace(/^[\s.,;:/\\|_*•·–—-]+(?=[A-Za-z0-9("'])/, "").trim();
+}
+
 /** Header/label text that is never an entity name, whatever source it leaks in from. */
 const NOT_AN_ENTITY_NAME =
   /^(?:name\s+of\s+(?:the\s+)?(?:company|companies|insurer|entity|entities|nbfc|nbfcs|bank)s?|nbfc\s+name|classification|sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|list\s+of\s+.*\b(?:added|removed|deleted)\b.*|\[object Object\])$/i;
@@ -485,6 +490,16 @@ async function run() {
         console.error(`  failed: ${err.message}`);
       }
 
+      {
+        // Leading filler such as ". . . . . / NAME" or ". , / NAME" (seen in the IRDAI
+        // agent list) is not part of the name.
+        const cleaned = [...new Set(names.map((n) => cleanLeadingJunk(n)).filter(Boolean))];
+        if (cleaned.length !== names.length || cleaned.some((n, i) => n !== names[i])) {
+          const changed = names.filter((n) => cleanLeadingJunk(n) !== n).length;
+          if (changed) console.log(`  removed leading punctuation from ${changed} name(s)`);
+        }
+        names = cleaned;
+      }
       {
         const kept = names.filter((n) => !NOT_AN_ENTITY_NAME.test(String(n).trim()));
         if (kept.length !== names.length) {
@@ -941,7 +956,13 @@ async function scrapeSebiIntermediaryCustom(source, page, expectedCount, hubPage
           downloadStats = lastDownloadStats;
           if (downloadNames.length > 0) {
             console.log(`  got ${downloadNames.length} names via Download button (${path.basename(downloadedFile)})`);
-            if (!expectedCount || downloadNames.length >= expectedCount) {
+            // Requirement: when SEBI's attachment (Download file) is available it is
+            // the source of truth - nothing is mixed in from the paginated pages.
+            // (Set SEBI_TOPUP_WITH_PAGINATION=1 to restore the old top-up.)
+            if (!expectedCount || downloadNames.length >= expectedCount || process.env.SEBI_TOPUP_WITH_PAGINATION !== "1") {
+              if (expectedCount && downloadNames.length < expectedCount) {
+                console.warn(`  NOTE: SEBI's downloaded file has ${downloadNames.length} distinct name(s) but its hub page says ${expectedCount}; using the file only, as required.`);
+              }
               return { names: downloadNames, via: "download", downloadStats };
             }
             console.warn(`  downloaded file has ${downloadNames.length}, expected ${expectedCount} - topping up via pagination.`);

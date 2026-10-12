@@ -48,15 +48,17 @@ jobs:
             output/diagnostics/**
           retention-days: 90
 
-      # Option B (optional): commit the fresh Excel file straight into the
-      # repo, e.g. into /data, so it's always at a stable URL. Uncomment if
-      # you'd rather have that than download-per-run artifacts.
-      # - name: Commit updated output
-      #   run: |
-      #     git config user.name "github-actions[bot]"
-      #     git config user.email "github-actions[bot]@users.noreply.github.com"
-      #     mkdir -p data
-      #     cp output/Combine_List_Output.xlsx data/Combine_List_Output.xlsx
-      #     git add data/Combine_List_Output.xlsx
-      #     git diff --cached --quiet || git commit -m "chore: refresh scraped entity list [skip ci]"
-      #     git push
+      # Option B: commit the fresh Excel into the repo at a stable path, so any
+      # computer (even one with no open internet, only GitHub) can pull it:
+      #   data/Combine_List_Output.xlsx   and   data/run-log.json
+      - name: Commit updated output
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p data
+          cp output/Combine_List_Output.xlsx data/Combine_List_Output.xlsx
+          cp output/run-log.json data/run-log.json
+          git add data/Combine_List_Output.xlsx data/run-log.json
+          git diff --cached --quiet || git commit -m "chore: refresh scraped entity list [skip ci]"
+          git pull --rebase origin ${GITHUB_REF_NAME} && git push

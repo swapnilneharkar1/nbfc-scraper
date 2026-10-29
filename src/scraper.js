@@ -28,7 +28,9 @@ import { fetchNbfcStatusDeltasFromArchive } from "./pressReleaseArchive.js";
 import { mergeStatuses, extractMasterListDate, canonicalKey } from "./statusMerge.js";
 import { parseRbiBanksSection, parseRbiPssSection, parseRbiStateCoop, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
 import { resolveSebiIntmId } from "./sebiUtils.js";
-import { getRank } from "./priorityMatrix.js";
+import { makeEntityKeyer } from "./entityKey.js";
+import { reportingCategory } from "./reportingRules.js";
+import { resolveWithPriorityMatrix } from "./resolve.js";
 import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
 
 const OUTPUT_DIR = path.resolve("output");
@@ -261,14 +263,22 @@ async function parseXlsxBuffer(buffer, { captureClassification = false } = {}) {
 }
 
 
-async function scrapePdfLink(source) {
+async function scrapePdfLink(source, browser = null) {
   // If we already know the direct file URL (verified by hand rather than
   // discovered via link-pattern guessing), skip the landing-page search
   // entirely - it's both faster and more reliable than pattern-matching
   // link text/hrefs, which breaks the moment the actual filename doesn't
   // match the guessed pattern (confirmed happening for nhb_hfc).
   if (source.fileUrl) {
-    return await downloadAndExtract(source.fileUrl, source);
+    try {
+      return await downloadAndExtract(source.fileUrl, source);
+    } catch (err) {
+      // NHB answers plain HTTP clients (GitHub runners) with 403. Retry through the real
+      // browser, which first visits the landing page so the site sets its cookies.
+      if (!browser || !/\b40[13]\b/.test(String(err.message))) throw err;
+      console.log(`  direct download refused (${err.message}) - retrying through the browser`);
+      return await downloadViaBrowser(source.url, source.fileUrl, source, browser);
+    }
   }
 
   const { data: html } = await axios.get(source.url, {
@@ -301,6 +311,28 @@ async function scrapePdfLink(source) {
   }
 
   return await downloadAndExtract(match.absHref, source);
+}
+
+async function downloadViaBrowser(landingUrl, fileUrl, source, browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  try {
+    await page.goto(landingUrl, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => null);
+    const b64 = await page.evaluate(async (u) => {
+      const r = await fetch(u, { credentials: "include" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const buf = new Uint8Array(await r.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      return btoa(bin);
+    }, fileUrl);
+    const data = Buffer.from(b64, "base64");
+    fs.writeFileSync(path.join(DOWNLOAD_DIR, `${source.key}.pdf`), data);
+    const parsed = await pdfParse(data);
+    return { names: dedupe(namesFromPdfText(parsed.text)), titleText: null };
+  } finally {
+    await page.close();
+  }
 }
 
 async function downloadAndExtract(fileUrl, source) {
@@ -444,7 +476,7 @@ async function run() {
         } else if (source.type === "xlsx_direct") {
           ({ names, titleText, classifications } = await scrapeXlsxDirect(source));
         } else if (source.type === "pdf_link") {
-          ({ names, titleText } = await scrapePdfLink(source));
+          ({ names, titleText } = await scrapePdfLink(source, browser));
         } else if (source.type === "rbi_banks_custom") {
           ({ names, note: scrapeNote } = await scrapeRbiBanksCustom(source, browser));
         } else if (source.type === "rbi_state_coop_custom") {
@@ -515,10 +547,10 @@ async function run() {
         // Classification column, when we have it - BRD #3) overrides the
         // source-level default; otherwise the source's Annex-1 category
         // applies to every entity from it.
-        const categoryAsPerRegulator = classifications.get(name) || source.categoryAsPerRegulator;
+        const { categoryAsPerRegulator, categoryAsPerReturn } = reportingCategory(source, name, classifications.get(name));
         rawHits.push({
           name,
-          categoryAsPerReturn: source.categoryAsPerReturn,
+          categoryAsPerReturn,
           categoryAsPerRegulator,
           regulator: source.regulator,
           sourceKey: source.key,
@@ -572,10 +604,28 @@ async function run() {
   // memberships for audit, but gets exactly one final reporting
   // classification: whichever category ranks highest (lowest rank number)
   // in the BRD's Priority data sheet.
-  const { resolved, multiCategoryEntities } = resolveWithPriorityMatrix(rawHits);
+  // Which rows are the same legal entity (handles Ltd/Limited, Pvt/Private, "&"/"and" and
+  // "Formerly known as ..." names, bracketed or not).
+  const keyer = makeEntityKeyer([...rawHits.map((h) => h.name), ...(statusReconciliation ? statusReconciliation.merged.map((m) => m.name) : [])]);
+
+  // Status shown in the Combine List for RBI master-list rows = status AFTER the press-release
+  // reconciliation (e.g. an NBFC whose CoR was cancelled / surrendered after the master list date).
+  if (statusReconciliation) {
+    const finalByKey = new Map();
+    for (const m of statusReconciliation.merged) if (m.statusHistory.length > 0) finalByKey.set(keyer(m.name), m.status);
+    let applied = 0;
+    for (const h of rawHits) {
+      if (h.sourceKey !== "rbi_nbfc" && h.sourceKey !== "rbi_nbfc_cancelled") continue;
+      const st = finalByKey.get(keyer(h.name));
+      if (st && st !== h.status) { h.status = st; applied++; }
+    }
+    console.log(`Applied press-release final status to ${applied} Combine List row(s).`);
+  }
+
+  const { resolved, multiCategoryEntities } = resolveWithPriorityMatrix(rawHits, keyer);
 
   const outFile = path.join(OUTPUT_DIR, "Combine_List_Output.xlsx");
-  await writeWorkbook(resolved, outFile, statusReconciliation, multiCategoryEntities, { rawHits, runLog });
+  await writeWorkbook(resolved, outFile, statusReconciliation, multiCategoryEntities, { rawHits, runLog, keyer });
   fs.writeFileSync(RUN_LOG_PATH, JSON.stringify(runLog, null, 2));
 
   console.log(`\nWrote ${resolved.length} resolved entities -> ${outFile}`);
@@ -590,63 +640,6 @@ async function run() {
         .join(", ")}. Check run-log.json and output/downloads/.`
     );
   }
-}
-
-/**
- * Groups raw per-source hits by normalized entity name. Entities appearing
- * under one category pass through unchanged. Entities appearing under
- * multiple categories (BRD #6) get a single final category chosen by
- * Priority Matrix rank (BRD #5), while every category they actually belong
- * to is preserved in memberships for audit/traceability.
- */
-function resolveWithPriorityMatrix(rawHits) {
-  const byName = new Map();
-
-  for (const hit of rawHits) {
-    const key = hit.name.toUpperCase().replace(/[.,()]/g, "").replace(/\s+/g, " ").trim();
-    if (!byName.has(key)) byName.set(key, { name: hit.name, memberships: [] });
-    byName.get(key).memberships.push(hit);
-  }
-
-  const resolved = [];
-  const multiCategoryEntities = [];
-
-  for (const { name, memberships } of byName.values()) {
-    const ranked = memberships
-      .map((m) => ({ ...m, rank: getRank(m.categoryAsPerRegulator) }))
-      .sort((a, b) => a.rank - b.rank);
-    const winner = ranked[0];
-
-    resolved.push({
-      name,
-      category: winner.categoryAsPerRegulator,
-      categoryAsPerReturn: winner.categoryAsPerReturn,
-      classification: winner.categoryAsPerRegulator,
-      institution: winner.categoryAsPerReturn,
-      regulator: winner.regulator,
-      sourceKey: winner.sourceKey,
-      status: winner.status,
-      allCategories: memberships.map((m) => m.categoryAsPerRegulator).join(" | "),
-      categoryCount: new Set(memberships.map((m) => m.categoryAsPerRegulator)).size,
-    });
-
-    const distinctCategories = new Set(memberships.map((m) => m.categoryAsPerRegulator));
-    if (distinctCategories.size > 1) {
-      multiCategoryEntities.push({
-        name,
-        finalCategory: winner.categoryAsPerRegulator,
-        finalCategoryRank: winner.rank,
-        allMemberships: ranked.map((m) => ({
-          category: m.categoryAsPerRegulator,
-          rank: m.rank,
-          regulator: m.regulator,
-          sourceKey: m.sourceKey,
-        })),
-      });
-    }
-  }
-
-  return { resolved, multiCategoryEntities };
 }
 
 // RBI's Banks page and PSS page are each read by many sources (8 bank

@@ -25,6 +25,7 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
     { header: "Source Key", key: "sourceKey", width: 20 },
     { header: "Scraped At", key: "scrapedAt", width: 20 },
     { header: "Final Reporting Row? (Priority Matrix)", key: "isFinal", width: 20 },
+    { header: "Entity Key (rows with the same key are one legal entity)", key: "entityKey", width: 26 },
   ];
   sheet.getRow(1).font = { bold: true };
 
@@ -34,7 +35,7 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
   // relationships are retained). "Final Reporting Row?" = Yes marks the one
   // row per entity chosen by the Priority Matrix (BRD #5); filter it to Yes
   // for the de-duplicated entity list.
-  const outRows = audit && audit.rawHits ? membershipRows(rows, audit.rawHits) : rows.map((r) => ({ ...r, isFinal: "Yes" }));
+  const outRows = audit && audit.rawHits ? membershipRows(rows, audit.rawHits, audit.keyer) : rows.map((r) => ({ ...r, isFinal: "Yes", entityKey: entityKey(r.name) }));
   for (const r of outRows) {
     const row = sheet.addRow({
       ...r,
@@ -50,7 +51,7 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
     }
   }
 
-  sheet.autoFilter = { from: "A1", to: "L1" };
+  sheet.autoFilter = { from: "A1", to: "M1" };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   if (multiCategoryEntities.length > 0) {
@@ -58,7 +59,7 @@ export async function writeWorkbook(rows, outFile, statusReconciliation = null, 
   }
 
   if (audit && audit.rawHits) {
-    writeSourceReconciliationSheet(wb, audit.rawHits, audit.runLog || [], rows);
+    writeSourceReconciliationSheet(wb, audit.rawHits, audit.runLog || [], rows, audit.keyer);
   }
 
   if (statusReconciliation) {
@@ -273,13 +274,13 @@ const entityKey = (name) => String(name).toUpperCase().replace(/[.,()]/g, "").re
  * "All Memberships" and "Multi-Category Entities") or repeated within the
  * source itself.
  */
-function writeSourceReconciliationSheet(wb, rawHits, runLog, resolvedRows) {
-  const winnerByKey = new Map(resolvedRows.map((r) => [entityKey(r.name), r.sourceKey]));
+function writeSourceReconciliationSheet(wb, rawHits, runLog, resolvedRows, keyer = entityKey) {
+  const winnerByKey = new Map(resolvedRows.map((r) => [keyer(r.name), r.sourceKey]));
   const perSource = new Map();
   for (const h of rawHits) {
     if (!perSource.has(h.sourceKey)) perSource.set(h.sourceKey, { keys: new Set(), wins: 0 });
     const e = perSource.get(h.sourceKey);
-    const k = entityKey(h.name);
+    const k = keyer(h.name);
     if (!e.keys.has(k)) {
       e.keys.add(k);
       if (winnerByKey.get(k) === h.sourceKey) e.wins++;
@@ -358,12 +359,12 @@ function writeAllMembershipsSheet(wb, rawHits, resolvedRows) {
 
 
 /** Expands the priority-resolved rows into one row per (entity, source) membership. */
-export function membershipRows(resolvedRows, rawHits) {
-  const byKey = new Map(resolvedRows.map((r) => [entityKey(r.name), r]));
+export function membershipRows(resolvedRows, rawHits, keyer = entityKey) {
+  const byKey = new Map(resolvedRows.map((r) => [keyer(r.name), r]));
   const seen = new Set();
   const out = [];
   for (const h of rawHits) {
-    const k = entityKey(h.name);
+    const k = keyer(h.name);
     const id = `${h.sourceKey}|${k}`;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -380,6 +381,7 @@ export function membershipRows(resolvedRows, rawHits) {
       categoryCount: r ? r.categoryCount : 1,
       sourceKey: h.sourceKey,
       isFinal: r && r.sourceKey === h.sourceKey ? "Yes" : "No",
+      entityKey: k,
     });
   }
   return out;

@@ -25,7 +25,7 @@ assert.deepEqual(entityNames("Piramal Finance Ltd, (Formerly Known As Piramal Fi
 const nbfc = { key: "rbi_nbfc", categoryAsPerRegulator: "NBFC", categoryAsPerReturn: "Other NBFCs" };
 assert.deepEqual(reportingCategory(nbfc, "X Housing Finance Ltd", "HFC"), { categoryAsPerRegulator: "HFCs", categoryAsPerReturn: "Housing Finance Companies" });
 assert.equal(reportingCategory(nbfc, "Phoenix ARC Limited").categoryAsPerRegulator, "ARC");
-assert.equal(reportingCategory(nbfc, "Phoenix ARC Limited").categoryAsPerReturn, "Other NBFCs");
+assert.equal(reportingCategory(nbfc, "Phoenix ARC Limited").categoryAsPerReturn, "Other Financial Entities");
 assert.equal(reportingCategory(nbfc, "Edelweiss Asset Reconstruction Company Limited").categoryAsPerRegulator, "ARC");
 assert.equal(reportingCategory(nbfc, "Northern Arc Capital Limited", "ICC*").categoryAsPerRegulator, "ICC*", "Northern Arc is an ICC, not an ARC");
 
@@ -45,3 +45,18 @@ assert.equal(niwas.categoryAsPerReturn, "Housing Finance Companies");
 const sup = resolved.find((r) => /supreme/i.test(r.name));
 assert.equal(sup.status, "Cancelled");
 console.log("entity_rules: all assertions passed");
+
+{
+  const k = makeEntityKeyer([
+    "Tyger Capital Private Limied (Formerly: Adani Capital Private Limited)",
+    "TYGER CAPITAL PRIVATE LIMITED",
+    "Tyger Home Finance Private Limited",
+    "Balasaria Holdings Private Limited (Name as per MCA - BRBS Holdings Private Limited)",
+    "BRBS HOLDINGS PRIVATE LIMITED",
+    "ABC Finance 1 Private Limited Company X", "ABC Finance 2 Private Limited Company X",
+  ]);
+  assert.equal(k("Tyger Capital Private Limied (Formerly: Adani Capital Private Limited)"), k("TYGER CAPITAL PRIVATE LIMITED"));
+  assert.notEqual(k("Tyger Home Finance Private Limited"), k("TYGER CAPITAL PRIVATE LIMITED"));
+  assert.equal(k("Balasaria Holdings Private Limited (Name as per MCA - BRBS Holdings Private Limited)"), k("BRBS HOLDINGS PRIVATE LIMITED"));
+  assert.notEqual(k("ABC Finance 1 Private Limited Company X"), k("ABC Finance 2 Private Limited Company X"));
+}

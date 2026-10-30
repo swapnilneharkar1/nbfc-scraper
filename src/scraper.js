@@ -28,7 +28,7 @@ import { fetchNbfcStatusDeltasFromArchive } from "./pressReleaseArchive.js";
 import { mergeStatuses, extractMasterListDate, canonicalKey } from "./statusMerge.js";
 import { parseRbiBanksSection, parseRbiPssSection, parseRbiStateCoop, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
 import { resolveSebiIntmId } from "./sebiUtils.js";
-import { makeEntityKeyer } from "./entityKey.js";
+import { makeEntityKeyer, entityNames } from "./entityKey.js";
 import { reportingCategory } from "./reportingRules.js";
 import { resolveWithPriorityMatrix } from "./resolve.js";
 import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
@@ -88,14 +88,22 @@ function extractTables(html, selector = "table") {
 
 
 async function scrapeHtmlTable(source) {
-  const { data: html } = await axios.get(source.url, {
-    headers: { "User-Agent": USER_AGENT },
-    timeout: 30000,
-  });
-  saveDiagnostic(`${source.key}.html`, typeof html === "string" ? html : String(html));
-  const tables = extractTables(html, source.tableSelector || "table");
-  const names = tables.flatMap(rowsToNames);
-  return { names: dedupe(names), titleText: null };
+  // altUrls: other addresses tried when the first gives no names (page moved / renamed).
+  const urls = [source.url, ...(source.altUrls || [])];
+  let last = null;
+  for (const url of urls) {
+    try {
+      const { data: html } = await axios.get(url, { headers: { "User-Agent": USER_AGENT }, timeout: 30000 });
+      saveDiagnostic(`${source.key}${url === source.url ? "" : "_alt"}.html`, typeof html === "string" ? html : String(html));
+      const tables = extractTables(html, source.tableSelector || "table");
+      const names = dedupe(tables.flatMap(rowsToNames));
+      if (names.length) return { names, titleText: null };
+    } catch (e) {
+      last = e;
+    }
+  }
+  if (last) throw last;
+  return { names: [], titleText: null };
 }
 
 /**
@@ -522,6 +530,17 @@ async function run() {
         console.error(`  failed: ${err.message}`);
       }
 
+      if (Array.isArray(source.seedNames) && source.seedNames.length) {
+        // Names the regulator's page is known to list; added only when the scrape did not already return them.
+        const have = new Set(names.map((n) => canonicalKey(entityNames(n).primary)));
+        const add = source.seedNames.filter((n) => !have.has(canonicalKey(n)));
+        if (add.length) {
+          console.log(`  added ${add.length} seed name(s) not found by the scrape`);
+          names = [...names, ...add];
+          scrapeNote = [scrapeNote, `seed names added: ${add.length}`].filter(Boolean).join("; ");
+          if (status === "empty") status = "ok";
+        }
+      }
       {
         // Leading filler such as ". . . . . / NAME" or ". , / NAME" (seen in the IRDAI
         // agent list) is not part of the name.

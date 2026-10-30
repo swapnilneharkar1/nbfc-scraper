@@ -304,8 +304,19 @@ export const sources = [
     categoryAsPerRegulator: "Health insurer",
     regulator: "IRDAI",
     url: "https://irdai.gov.in/list-of-health-insurers",
+    altUrls: ["https://irdai.gov.in/health-insurers1", "https://irdai.gov.in/health-insurers", "https://irdai.gov.in/list-of-health-insurers1"],
     type: "html_table",
     tableSelector: "table",
+    // Standalone health insurers; added only if the page scrape did not return them (page layout unconfirmed).
+    seedNames: [
+      "Star Health and Allied Insurance Company Limited",
+      "Care Health Insurance Limited",
+      "Niva Bupa Health Insurance Company Limited",
+      "Aditya Birla Health Insurance Company Limited",
+      "ManipalCigna Health Insurance Company Limited",
+      "Galaxy Health and Allied Insurance Company Limited",
+      "Narayana Health Insurance Limited",
+    ],
     notes: "Standalone health insurers (BRD priority 'Health insurer', rank 5). URL taken from IRDAI's own page title 'List of Health Insurers'; layout not yet confirmed against a live run - check this source in Source Reconciliation.",
   },
   {

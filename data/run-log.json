@@ -7,7 +7,7 @@
     "expectedCount": null,
     "category": "NBFC",
     "regulator": "RBI",
-    "ms": 3052,
+    "ms": 3746,
     "error": null,
     "notes": "RBI's file has SR No | NBFC Name | Regional Office | Whether CoR for public deposits | Classification | CIN | Address | Email ID. The Classification column is what BRD issue #3 asks for - captured per-entity, not defaulted to a generic 'NBFC' label. CAPTCHA caveat: see manual-downloads/rbi_nbfc.xlsx fallback in scraper.js.",
     "scrapeNote": null
@@ -20,7 +20,7 @@
     "expectedCount": null,
     "category": "NBFC",
     "regulator": "RBI",
-    "ms": 1089,
+    "ms": 1206,
     "error": null,
     "notes": "Matches Annex-3 'Cancelled NBFC & ARC'. Same CAPTCHA caveat as rbi_nbfc.",
     "scrapeNote": null
@@ -29,11 +29,11 @@
     "key": "rbi_pss_operating",
     "url": "https://www.rbi.org.in/Scripts/PublicationsView.aspx?id=12043",
     "status": "ok",
-    "count": 134,
+    "count": 133,
     "expectedCount": null,
     "category": "PSS Operating",
     "regulator": "RBI",
-    "ms": 2293,
+    "ms": 3148,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -46,7 +46,7 @@
     "expectedCount": null,
     "category": "PSS Revoked",
     "regulator": "RBI",
-    "ms": 1,
+    "ms": 2,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -85,7 +85,7 @@
     "expectedCount": null,
     "category": "PSS Surrender/Cancelled",
     "regulator": "RBI",
-    "ms": 1,
+    "ms": 2,
     "error": null,
     "notes": "Section E (cancelled per regulatory requirement) - now separated from section D above.",
     "scrapeNote": null
@@ -98,7 +98,7 @@
     "expectedCount": null,
     "category": "HFCs",
     "regulator": "NHB",
-    "ms": 2257,
+    "ms": 1482,
     "error": "HTTP 403",
     "notes": "Previous version searched the landing page for a link matching /list.*hfc.*\\.pdf$/i and found nothing - the real file is named Registered_Companies.pdf, which doesn't match that pattern at all. Now points directly at the confirmed real URL instead of guessing from a link-text pattern.",
     "scrapeNote": null
@@ -111,7 +111,7 @@
     "expectedCount": null,
     "category": "Private Sector Banks in India",
     "regulator": "RBI",
-    "ms": 3167,
+    "ms": 3670,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -124,7 +124,7 @@
     "expectedCount": null,
     "category": "Public Sector Banks in India",
     "regulator": "RBI",
-    "ms": 35,
+    "ms": 42,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -150,7 +150,7 @@
     "expectedCount": null,
     "category": "Small Finance Banks (SFB)",
     "regulator": "RBI",
-    "ms": 20,
+    "ms": 26,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -163,7 +163,7 @@
     "expectedCount": null,
     "category": "Payments Banks (PB)",
     "regulator": "RBI",
-    "ms": 18,
+    "ms": 26,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -176,7 +176,7 @@
     "expectedCount": null,
     "category": "Regional Rural Banks in India",
     "regulator": "RBI",
-    "ms": 16,
+    "ms": 32,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -215,7 +215,7 @@
     "expectedCount": null,
     "category": "State Co-operative Banks",
     "regulator": "RBI",
-    "ms": 6,
+    "ms": 1,
     "error": null,
     "notes": "RBI's Banks page lists ALL State Co-operative Banks in one numbered block (34 entries, scheduled and non-scheduled together). The block is read from the page and split using nonScheduledKeywords. The previous source, a 2014 PDF, was out of date.",
     "scrapeNote": "State Co-op block: 34 banks (24 scheduled, 10 non-scheduled)."
@@ -228,7 +228,7 @@
     "expectedCount": null,
     "category": "Scheduled Urban Co-operative Banks",
     "regulator": "RBI",
-    "ms": 754,
+    "ms": 896,
     "error": null,
     "notes": "Found via search - direct RBI PDF of Scheduled Urban Co-operative Banks. Same PDF-extraction caveat as rbi_bank_state_coop.",
     "scrapeNote": null
@@ -241,7 +241,7 @@
     "expectedCount": null,
     "category": "Non-Scheduled Urban Co-operative Banks",
     "regulator": "RBI",
-    "ms": 2487,
+    "ms": 2358,
     "error": null,
     "notes": "Found via search - a plausible match for Non-Scheduled Urban Co-op Banks based on its content (urban bank names/addresses), but the filename itself doesn't explicitly confirm Urban vs State scope - verify against the PDF directly.",
     "scrapeNote": null
@@ -267,7 +267,7 @@
     "expectedCount": null,
     "category": "Life Insurance Companies",
     "regulator": "IRDAI",
-    "ms": 2265,
+    "ms": 2356,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -280,7 +280,7 @@
     "expectedCount": null,
     "category": "Non-Life Insurance Companies",
     "regulator": "IRDAI",
-    "ms": 2074,
+    "ms": 2292,
     "error": null,
     "notes": "Found via search, matching the same URL naming pattern as the already-working life-insurers1 (just life -> non-life).",
     "scrapeNote": null
@@ -293,7 +293,7 @@
     "expectedCount": null,
     "category": "Health insurer",
     "regulator": "IRDAI",
-    "ms": 2040,
+    "ms": 2171,
     "error": null,
     "notes": "Standalone health insurers (BRD priority 'Health insurer', rank 5). URL taken from IRDAI's own page title 'List of Health Insurers'; layout not yet confirmed against a live run - check this source in Source Reconciliation.",
     "scrapeNote": "seed names added: 5"
@@ -306,7 +306,7 @@
     "expectedCount": null,
     "category": "Re insurers",
     "regulator": "IRDAI",
-    "ms": 2007,
+    "ms": 2308,
     "error": null,
     "notes": "Confirmed real IRDAI page via search - different URL style than the -insurers1 pattern, but genuinely IRDAI's own page for this list.",
     "scrapeNote": null
@@ -319,7 +319,7 @@
     "expectedCount": null,
     "category": "CA-Insurer-List",
     "regulator": "IRDAI",
-    "ms": 2977,
+    "ms": 2678,
     "error": null,
     "notes": "CA = Corporate Agents (confirmed). Same -1 suffix pattern as life-insurers1/non-life-insurers1.",
     "scrapeNote": null
@@ -332,10 +332,10 @@
     "expectedCount": 9,
     "category": "Credit Rating Agency",
     "regulator": "SEBI",
-    "ms": 1855,
+    "ms": 1873,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Credit Rating Agency - CRA [ Oct 29, 2026 ]; intmId used: 7; expected: 9; got: 9; via: download; download file rows: 9, distinct names: 9, blank: 0"
+    "scrapeNote": "hub label: Credit Rating Agency - CRA [ Nov 01, 2026 ]; intmId used: 7; expected: 9; got: 9; via: download; download file rows: 9, distinct names: 9, blank: 0"
   },
   {
     "key": "sebi_venture_capital",
@@ -345,10 +345,10 @@
     "expectedCount": 149,
     "category": "Venture Capital Funds",
     "regulator": "SEBI",
-    "ms": 1865,
+    "ms": 1882,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Venture Capital Funds [ Oct 29, 2026 ]; intmId used: 21; expected: 149; got: 146; via: download; download file rows: 149, distinct names: 146, blank: 0"
+    "scrapeNote": "hub label: Registered Venture Capital Funds [ Nov 01, 2026 ]; intmId used: 21; expected: 149; got: 146; via: download; download file rows: 149, distinct names: 146, blank: 0"
   },
   {
     "key": "sebi_foreign_vc",
@@ -358,62 +358,62 @@
     "expectedCount": 310,
     "category": "Registered Foreign Venture Capital Investors",
     "regulator": "SEBI",
-    "ms": 1864,
+    "ms": 1901,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Foreign Venture Capital Investors [ Oct 29, 2026 ]; intmId used: 25; expected: 310; got: 301; via: download; download file rows: 310, distinct names: 301, blank: 0"
+    "scrapeNote": "hub label: Registered Foreign Venture Capital Investors [ Nov 01, 2026 ]; intmId used: 25; expected: 310; got: 301; via: download; download file rows: 310, distinct names: 301, blank: 0"
   },
   {
     "key": "sebi_investment_adviser",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=13",
     "status": "ok",
-    "count": 1062,
-    "expectedCount": 1065,
+    "count": 1068,
+    "expectedCount": 1071,
     "category": "Investment Adviser",
     "regulator": "SEBI",
-    "ms": 3418,
+    "ms": 4425,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Investment Adviser [ Oct 29, 2026 ]; intmId used: 13; expected: 1065; got: 1062; via: download; download file rows: 1065, distinct names: 1062, blank: 0"
+    "scrapeNote": "hub label: Investment Adviser [ Nov 01, 2026 ]; intmId used: 13; expected: 1071; got: 1068; via: download; download file rows: 1071, distinct names: 1068, blank: 0"
   },
   {
     "key": "sebi_broker_equity",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=30",
     "status": "ok",
     "count": 2663,
-    "expectedCount": 5004,
+    "expectedCount": 5010,
     "category": "Stock Brokers in equity segment",
     "regulator": "SEBI",
-    "ms": 8201,
+    "ms": 12864,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Stock Brokers in equity segment [ Oct 29, 2026 ]; intmId used: 30; expected: 5004; got: 2663; via: download; download file rows: 5004, distinct names: 2663, blank: 0"
+    "scrapeNote": "hub label: Registered Stock Brokers in equity segment [ Nov 01, 2026 ]; intmId used: 30; expected: 5010; got: 2663; via: download; download file rows: 5010, distinct names: 2663, blank: 0"
   },
   {
     "key": "sebi_broker_equity_derivative",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=31",
     "status": "ok",
-    "count": 1731,
-    "expectedCount": 3800,
+    "count": 1730,
+    "expectedCount": 3804,
     "category": "Stock Brokers in Equity Derivative Segment",
     "regulator": "SEBI",
-    "ms": 6643,
+    "ms": 10167,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Stock Brokers in Equity Derivative Segment [ Oct 29, 2026 ]; intmId used: 31; expected: 3800; got: 1731; via: download; download file rows: 3800, distinct names: 1731, blank: 0"
+    "scrapeNote": "hub label: Registered Stock Brokers in Equity Derivative Segment [ Nov 01, 2026 ]; intmId used: 31; expected: 3804; got: 1730; via: download; download file rows: 3804, distinct names: 1730, blank: 0"
   },
   {
     "key": "sebi_broker_commodity_derivative",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=2",
     "status": "ok",
     "count": 854,
-    "expectedCount": 2108,
+    "expectedCount": 2109,
     "category": "Stock Brokers in Commodity Derivative",
     "regulator": "SEBI",
-    "ms": 4454,
+    "ms": 6506,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Stock Brokers in Commodity Derivative Segment [ Oct 29, 2026 ]; intmId used: 2; expected: 2108; got: 854; via: download; download file rows: 2108, distinct names: 854, blank: 0"
+    "scrapeNote": "hub label: Registered Stock Brokers in Commodity Derivative Segment [ Nov 01, 2026 ]; intmId used: 2; expected: 2109; got: 854; via: download; download file rows: 2109, distinct names: 854, blank: 0"
   },
   {
     "key": "sebi_broker_debt",
@@ -423,88 +423,88 @@
     "expectedCount": 765,
     "category": "Stock Brokers in Debt Segement",
     "regulator": "SEBI",
-    "ms": 2387,
+    "ms": 3397,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Stock Brokers in Debt Segment [ Oct 29, 2026 ]; intmId used: 37; expected: 765; got: 456; via: download; download file rows: 765, distinct names: 456, blank: 0"
+    "scrapeNote": "hub label: Registered Stock Brokers in Debt Segment [ Nov 01, 2026 ]; intmId used: 37; expected: 765; got: 456; via: download; download file rows: 765, distinct names: 456, blank: 0"
   },
   {
     "key": "sebi_broker_interest_rate_derivative",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=38",
     "status": "ok",
-    "count": 869,
-    "expectedCount": 1483,
+    "count": 868,
+    "expectedCount": 1482,
     "category": "Stock Brokers in Interest Rate Derivative",
     "regulator": "SEBI",
-    "ms": 3446,
+    "ms": 4943,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Stock Brokers in Interest Rate Derivative Segment [ Oct 29, 2026 ]; intmId used: 38; expected: 1483; got: 869; via: download; download file rows: 1483, distinct names: 869, blank: 0"
+    "scrapeNote": "hub label: Registered Stock Brokers in Interest Rate Derivative Segment [ Nov 01, 2026 ]; intmId used: 38; expected: 1482; got: 868; via: download; download file rows: 1482, distinct names: 868, blank: 0"
   },
   {
     "key": "sebi_broker_currency_derivative",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=32",
     "status": "ok",
-    "count": 1459,
-    "expectedCount": 2691,
+    "count": 1456,
+    "expectedCount": 2686,
     "category": "Stock Brokers in Currency Derivative Segment",
     "regulator": "SEBI",
-    "ms": 4994,
+    "ms": 7568,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Stock Brokers in Currency Derivative Segment [ Oct 29, 2026 ]; intmId used: 32; expected: 2691; got: 1459; via: download; download file rows: 2691, distinct names: 1459, blank: 0"
+    "scrapeNote": "hub label: Registered Stock Brokers in Currency Derivative Segment [ Nov 01, 2026 ]; intmId used: 32; expected: 2686; got: 1456; via: download; download file rows: 2686, distinct names: 1456, blank: 0"
   },
   {
     "key": "sebi_portfolio_managers",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=33",
     "status": "ok",
-    "count": 539,
-    "expectedCount": 542,
+    "count": 541,
+    "expectedCount": 544,
     "category": "Registered Portfolio Managers",
     "regulator": "SEBI",
-    "ms": 2382,
+    "ms": 2888,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Portfolio Managers [ Oct 29, 2026 ]; intmId used: 33; expected: 542; got: 539; via: download; download file rows: 542, distinct names: 539, blank: 0"
+    "scrapeNote": "hub label: Registered Portfolio Managers [ Nov 01, 2026 ]; intmId used: 33; expected: 544; got: 541; via: download; download file rows: 544, distinct names: 541, blank: 0"
   },
   {
     "key": "sebi_mutual_funds",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=23",
     "status": "ok",
-    "count": 61,
-    "expectedCount": 61,
+    "count": 62,
+    "expectedCount": 62,
     "category": "Mutual Funds",
     "regulator": "SEBI",
-    "ms": 1343,
+    "ms": 1361,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Mutual Funds [ Oct 29, 2026 ]; intmId used: 23; expected: 61; got: 61; via: download; download file rows: 61, distinct names: 61, blank: 0"
+    "scrapeNote": "hub label: Registered Mutual Funds [ Nov 01, 2026 ]; intmId used: 23; expected: 62; got: 62; via: download; download file rows: 62, distinct names: 62, blank: 0"
   },
   {
     "key": "sebi_dp_cdsl",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=18",
     "status": "ok",
     "count": 646,
-    "expectedCount": 754,
+    "expectedCount": 755,
     "category": "Depository Participants - CDSL",
     "regulator": "SEBI",
-    "ms": 2884,
+    "ms": 3401,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Depository Participants - CDSL [ Oct 29, 2026 ]; intmId used: 18; expected: 754; got: 646; via: download; download file rows: 754, distinct names: 646, blank: 0"
+    "scrapeNote": "hub label: Registered Depository Participants - CDSL [ Nov 01, 2026 ]; intmId used: 18; expected: 755; got: 646; via: download; download file rows: 755, distinct names: 646, blank: 0"
   },
   {
     "key": "sebi_dp_nsdl",
     "url": "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=19",
     "status": "ok",
-    "count": 320,
-    "expectedCount": 356,
+    "count": 321,
+    "expectedCount": 357,
     "category": "Depository Participants - NSDL",
     "regulator": "SEBI",
-    "ms": 1859,
+    "ms": 2389,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Depository Participants - NSDL [ Oct 29, 2026 ]; intmId used: 19; expected: 356; got: 320; via: download; download file rows: 356, distinct names: 320, blank: 0"
+    "scrapeNote": "hub label: Registered Depository Participants - NSDL [ Nov 01, 2026 ]; intmId used: 19; expected: 357; got: 321; via: download; download file rows: 357, distinct names: 321, blank: 0"
   },
   {
     "key": "sebi_merchant_bankers",
@@ -514,10 +514,10 @@
     "expectedCount": 253,
     "category": "Merchant Banker",
     "regulator": "SEBI",
-    "ms": 1859,
+    "ms": 2366,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Merchant Bankers [ Oct 29, 2026 ]; intmId used: 9; expected: 253; got: 253; via: download; download file rows: 253, distinct names: 253, blank: 0"
+    "scrapeNote": "hub label: Merchant Bankers [ Nov 01, 2026 ]; intmId used: 9; expected: 253; got: 253; via: download; download file rows: 253, distinct names: 253, blank: 0"
   },
   {
     "key": "sebi_debenture_trustee",
@@ -527,10 +527,10 @@
     "expectedCount": 26,
     "category": "Debentures Trustee",
     "regulator": "SEBI",
-    "ms": 1364,
+    "ms": 1344,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Debentures Trustee [ Oct 29, 2026 ]; intmId used: 6; expected: 26; got: 25; via: download; download file rows: 26, distinct names: 25, blank: 0"
+    "scrapeNote": "hub label: Debentures Trustee [ Nov 01, 2026 ]; intmId used: 6; expected: 26; got: 25; via: download; download file rows: 26, distinct names: 25, blank: 0"
   },
   {
     "key": "sebi_custodians",
@@ -540,10 +540,10 @@
     "expectedCount": 18,
     "category": "Registered Custodians",
     "regulator": "SEBI",
-    "ms": 1354,
+    "ms": 1351,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registered Custodians [ Oct 29, 2026 ]; intmId used: 27; expected: 18; got: 18; via: download; download file rows: 18, distinct names: 18, blank: 0"
+    "scrapeNote": "hub label: Registered Custodians [ Nov 01, 2026 ]; intmId used: 27; expected: 18; got: 18; via: download; download file rows: 18, distinct names: 18, blank: 0"
   },
   {
     "key": "sebi_share_transfer_agent",
@@ -553,10 +553,10 @@
     "expectedCount": 80,
     "category": "Share Transfer Agent",
     "regulator": "SEBI",
-    "ms": 1351,
+    "ms": 1880,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Registrars to an issue and share Transfer Agents [ Oct 29, 2026 ]; intmId used: 10; expected: 80; got: 80; via: download; download file rows: 80, distinct names: 80, blank: 0"
+    "scrapeNote": "hub label: Registrars to an issue and share Transfer Agents [ Nov 01, 2026 ]; intmId used: 10; expected: 80; got: 80; via: download; download file rows: 80, distinct names: 80, blank: 0"
   },
   {
     "key": "sebi_banker_to_issue",
@@ -566,10 +566,10 @@
     "expectedCount": 63,
     "category": "Banker to an Issue",
     "regulator": "SEBI",
-    "ms": 1344,
+    "ms": 1888,
     "error": null,
     "notes": null,
-    "scrapeNote": "hub label: Banker to an Issue [ Oct 29, 2026 ]; intmId used: 5; expected: 63; got: 63; via: download; download file rows: 63, distinct names: 63, blank: 0"
+    "scrapeNote": "hub label: Banker to an Issue [ Nov 01, 2026 ]; intmId used: 5; expected: 63; got: 63; via: download; download file rows: 63, distinct names: 63, blank: 0"
   },
   {
     "key": "pfrda_pension_fund",
@@ -579,7 +579,7 @@
     "expectedCount": null,
     "category": "Pension Fund",
     "regulator": "PFRDA",
-    "ms": 6335,
+    "ms": 4610,
     "error": null,
     "notes": "Previous version read EVERY table on the page and so picked up the wrong one. The page's raw text/HTML is saved to output/diagnostics/ on every run so the selection can be checked.",
     "scrapeNote": null

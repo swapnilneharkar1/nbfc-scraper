@@ -8,7 +8,7 @@
  *     them under "Other Financial Entities" with classification "ARC".
  */
 const ARC_TOKEN = /\bARCs?\b/; // upper-case only, so "Northern Arc Capital" is not an ARC
-const ARC_WORDS = /asset[s]?\s+reconstruction|securiti[sz]ation\s+(?:and|&)\s+reconstruction/i;
+const ARC_WORDS = /\breconstruction\b/i; // "Asset(s) Reconstruction", "Securitisation & Reconstruction", "Assets Care & Reconstruction Enterprise"
 const isArcName = (n) => ARC_TOKEN.test(n) || ARC_WORDS.test(n);
 const HFC_CLASSIFICATION = /^\s*HFCs?\s*$/i;
 
@@ -20,7 +20,7 @@ export function reportingCategory(source, name, classification) {
   if (classification && HFC_CLASSIFICATION.test(classification)) {
     return { categoryAsPerRegulator: "HFCs", categoryAsPerReturn: "Housing Finance Companies" };
   }
-  if (source.key === "rbi_nbfc") {
+  if (source.key === "rbi_nbfc" || source.key === "rbi_nbfc_cancelled") {
     if (classification === "ARC" || isArcName(String(name || ""))) {
       return { categoryAsPerRegulator: "ARC", categoryAsPerReturn: "Other Financial Entities" };
     }

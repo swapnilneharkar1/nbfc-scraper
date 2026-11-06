@@ -29,6 +29,7 @@ import { mergeStatuses, extractMasterListDate, canonicalKey } from "./statusMerg
 import { parseRbiBanksSection, parseRbiPssSection, parseRbiStateCoop, parseSebiIntermediaryPage, parseSebiHubCounts } from "./customParsers.js";
 import { resolveSebiIntmId } from "./sebiUtils.js";
 import { makeEntityKeyer, entityNames } from "./entityKey.js";
+import { applyNameOverrides } from "./manualOverrides.js";
 import { reportingCategory } from "./reportingRules.js";
 import { resolveWithPriorityMatrix } from "./resolve.js";
 import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
@@ -539,6 +540,14 @@ async function run() {
           names = [...names, ...add];
           scrapeNote = [scrapeNote, `seed names added: ${add.length}`].filter(Boolean).join("; ");
           if (status === "empty") status = "ok";
+        }
+      }
+      {
+        const o = applyNameOverrides(source.key, names);
+        if (o.applied) {
+          console.log(`  manual name override applied to ${o.applied} row(s)`);
+          names = o.names;
+          scrapeNote = [scrapeNote, `manual name override: ${o.applied}`].filter(Boolean).join("; ");
         }
       }
       {

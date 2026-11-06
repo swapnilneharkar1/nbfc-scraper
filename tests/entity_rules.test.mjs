@@ -60,3 +60,15 @@ console.log("entity_rules: all assertions passed");
   assert.equal(k("Balasaria Holdings Private Limited (Name as per MCA - BRBS Holdings Private Limited)"), k("BRBS HOLDINGS PRIVATE LIMITED"));
   assert.notEqual(k("ABC Finance 1 Private Limited Company X"), k("ABC Finance 2 Private Limited Company X"));
 }
+
+{
+  const { applyNameOverrides } = await import("../src/manualOverrides.js");
+  assert.equal(reportingCategory(nbfc, "Assets Care & Reconstruction Enterprise Limited", "NBFC").categoryAsPerReturn, "Other Financial Entities");
+  assert.equal(reportingCategory({ ...nbfc, key: "rbi_nbfc_cancelled" }, "Lone star India Asset Reconstruction Private Limited").categoryAsPerRegulator, "ARC");
+  const o = applyNameOverrides("rbi_nbfc", ["Standard Chartered Investments & Loans (India) Limited", "Other Co Limited"]);
+  assert.equal(o.applied, 1);
+  assert.equal(o.names[0], "Standard Chartered Capital Limited (Formerly: Standard Chartered Investments & Loans (India) Limited)");
+  assert.equal(applyNameOverrides("sebi_broker_equity", ["Standard Chartered Investments & Loans (India) Limited"]).applied, 0);
+  const k = makeEntityKeyer(o.names.concat(["STANDARD CHARTERED CAPITAL LIMITED"]));
+  assert.equal(k(o.names[0]), k("STANDARD CHARTERED CAPITAL LIMITED"));
+}

@@ -182,7 +182,7 @@ async function scrapeAspxDynamic(source, browser) {
  * that cannot be solved by a script. If no local copy exists, attempts the
  * live download and clearly flags a captcha_block if that's what comes back.
  */
-async function scrapeXlsxDirect(source) {
+async function scrapeXlsxDirect(source, browser) {
   const manualPath = path.join(MANUAL_DIR, `${source.key}.xlsx`);
   const opts = { captureClassification: !!source.captureClassificationColumn };
   if (fs.existsSync(manualPath)) {
@@ -202,6 +202,19 @@ async function scrapeXlsxDirect(source) {
     contentType.includes("text/html") ||
     Buffer.from(res.data.slice(0, 200)).toString("utf8").includes("<html");
 
+  if (looksLikeHtml && browser) {
+    // The plain request got RBI's challenge page: retry once from inside a real browser page.
+    try {
+      console.log("  direct download got an HTML challenge page - retrying through the browser");
+      const data = await fetchBytesViaBrowser(source.url, source.fileUrl, browser);
+      if (data.slice(0, 2).toString("latin1") === "PK") {
+        fs.writeFileSync(path.join(DOWNLOAD_DIR, `${source.key}.xlsx`), data);
+        return await parseXlsxBuffer(data, opts);
+      }
+    } catch (e) {
+      console.log(`  browser retry failed: ${e.message}`);
+    }
+  }
   if (looksLikeHtml) {
     // Save the response for debugging and raise a clear, specific error
     // rather than trying (and failing) to parse HTML as a spreadsheet.
@@ -335,6 +348,25 @@ async function scrapePdfLink(source, browser = null) {
   return await downloadAndExtract(match.absHref, source);
 }
 
+async function fetchBytesViaBrowser(landingUrl, fileUrl, browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  try {
+    await page.goto(landingUrl, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => null);
+    const b64 = await page.evaluate(async (u) => {
+      const r = await fetch(u, { credentials: "include" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const buf = new Uint8Array(await r.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      return btoa(bin);
+    }, fileUrl);
+    return Buffer.from(b64, "base64");
+  } finally {
+    await page.close();
+  }
+}
+
 async function downloadViaBrowser(landingUrl, fileUrl, source, browser) {
   const page = await browser.newPage();
   await page.setUserAgent(USER_AGENT);
@@ -425,6 +457,37 @@ function dedupe(names) {
   return [...new Set(names.map((n) => n.trim()).filter(Boolean))];
 }
 
+let previousRowsCache = null;
+/** Rows of the previously published workbook, grouped by Source Key: Map(key -> [{name, category, status}]). */
+async function loadPreviousRows() {
+  if (previousRowsCache) return previousRowsCache;
+  previousRowsCache = new Map();
+  const file = [process.env.PREVIOUS_OUTPUT, path.join("data", "Combine_List_Output.xlsx")].find((f) => f && fs.existsSync(f));
+  if (!file) return previousRowsCache;
+  try {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(file);
+    const ws = wb.getWorksheet("Combine List");
+    const header = {};
+    ws.getRow(1).eachCell((c, i) => { header[String(c.value).trim()] = i; });
+    const col = (label) => Object.entries(header).find(([h]) => h.startsWith(label))?.[1];
+    const [cName, cCat, cStatus, cKey] = [col("Name of the"), col("Category (as per Regulator)"), col("Status"), col("Source Key")];
+    if (!cName || !cKey) return previousRowsCache;
+    ws.eachRow((row, n) => {
+      if (n === 1) return;
+      const key = String(row.getCell(cKey).value ?? "").trim();
+      const name = String(row.getCell(cName).value ?? "").trim();
+      if (!key || !name) return;
+      if (!previousRowsCache.has(key)) previousRowsCache.set(key, []);
+      previousRowsCache.get(key).push({ name, category: String(row.getCell(cCat).value ?? "").trim() || undefined, status: String(row.getCell(cStatus).value ?? "").trim() || "Active" });
+    });
+    console.log(`Previous workbook loaded for stale fallback: ${file}`);
+  } catch (e) {
+    console.warn(`Could not read previous workbook (${e.message}) - no stale fallback available`);
+  }
+  return previousRowsCache;
+}
+
 async function run() {
   const browser = await puppeteer.launch({
     headless: "new",
@@ -496,7 +559,7 @@ async function run() {
         } else if (source.type === "aspx_dynamic") {
           ({ names, titleText } = await scrapeAspxDynamic(source, browser));
         } else if (source.type === "xlsx_direct") {
-          ({ names, titleText, classifications } = await scrapeXlsxDirect(source));
+          ({ names, titleText, classifications } = await scrapeXlsxDirect(source, browser));
         } else if (source.type === "pdf_link") {
           ({ names, titleText } = await scrapePdfLink(source, browser));
         } else if (source.type === "rbi_banks_custom") {
@@ -555,6 +618,20 @@ async function run() {
           if (status === "empty") status = "ok";
         }
       }
+      // A live source that failed (RBI/NHB sometimes block GitHub's servers) must not silently shrink the output:
+      // reuse that source's rows from the previous published workbook and say so in the run log.
+      let staleStatuses = null;
+      if ((status === "error" || status === "empty") && names.length === 0) {
+        const prev = (await loadPreviousRows()).get(source.key);
+        if (prev && prev.length) {
+          names = prev.map((r) => r.name);
+          classifications = new Map(prev.map((r) => [r.name, r.category]));
+          staleStatuses = new Map(prev.map((r) => [r.name, r.status]));
+          scrapeNote = [scrapeNote, `LIVE SOURCE FAILED (${error || status}); reused ${prev.length} row(s) from the previous published workbook`].filter(Boolean).join("; ");
+          console.warn(`  live source failed - reusing ${prev.length} row(s) from the previous workbook (STALE)`);
+          status = "stale_previous_run";
+        }
+      }
       if (source.englishOnly) {
         const eng = names.filter((n) => isEnglishName(n));
         if (eng.length !== names.length) console.log(`  dropped ${names.length - eng.length} non-English name(s)`);
@@ -600,7 +677,7 @@ async function run() {
           categoryAsPerRegulator,
           regulator: source.regulator,
           sourceKey: source.key,
-          status: source.statusOverride || "Active",
+          status: (staleStatuses && staleStatuses.get(name)) || source.statusOverride || "Active",
         });
       }
 
@@ -678,6 +755,10 @@ async function run() {
   console.log(`${multiCategoryEntities.length} entities had multiple category memberships (see 'Multi-Category Entities' sheet)`);
   console.log(`Run log -> ${RUN_LOG_PATH}`);
 
+  const stale = runLog.filter((r) => r.status === "stale_previous_run");
+  if (stale.length > 0) {
+    console.warn(`\n${stale.length} source(s) could not be downloaded live and were taken from the PREVIOUS published workbook: ${stale.map((f) => f.key).join(", ")}.`);
+  }
   const failed = runLog.filter((r) => r.status === "error" || r.status === "empty");
   if (failed.length > 0) {
     console.warn(

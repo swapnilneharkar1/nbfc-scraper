@@ -407,7 +407,7 @@ export const sources = [
     categoryAsPerRegulator: "Third-party-administrators",
     regulator: "IRDAI",
     url: "https://irdai.gov.in/third-party-administrators-tpa-s-",
-    type: "html_table",
+    type: "aspx_dynamic", // browser-rendered: the table is filled in by the page's JavaScript, so a plain download sees no rows
     tableSelector: "table",
     paginate: true, // follows ?page=N until no new names
     englishOnly: true, // drop names that are not in English

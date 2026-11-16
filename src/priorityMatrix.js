@@ -57,6 +57,14 @@ export const PRIORITY_MATRIX = [
   { rank: 10, category: "Stock Brokers in equity segment" },
   { rank: 10, category: "Stock Brokers in Interest Rate Derivative" },
   { rank: 10, category: "Venture Capital Funds" },
+  // Added 13 Nov 2026 (IRDAI intermediary lists, reported under Other Financial Entities) - not in the BRD sheet.
+  { rank: 10, category: "Foreign Reinsurance Branches" },
+  { rank: 10, category: "Brokers" },
+  { rank: 10, category: "Surveyors" },
+  { rank: 10, category: "Web-aggregators" },
+  { rank: 10, category: "Insurance-repository" },
+  { rank: 10, category: "Imf" },
+  { rank: 10, category: "Third-party-administrators" },
 ];
 
 // Any category not explicitly in the BRD's Priority data sheet gets this

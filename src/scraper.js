@@ -32,7 +32,7 @@ import { makeEntityKeyer, entityNames } from "./entityKey.js";
 import { applyNameOverrides } from "./manualOverrides.js";
 import { reportingCategory } from "./reportingRules.js";
 import { resolveWithPriorityMatrix } from "./resolve.js";
-import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
+import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, isEnglishName, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
 
 const OUTPUT_DIR = path.resolve("output");
 const DOWNLOAD_DIR = path.resolve("output", "downloads");
@@ -94,10 +94,23 @@ async function scrapeHtmlTable(source) {
   let last = null;
   for (const url of urls) {
     try {
-      const { data: html } = await axios.get(url, { headers: { "User-Agent": USER_AGENT }, timeout: 30000 });
-      saveDiagnostic(`${source.key}${url === source.url ? "" : "_alt"}.html`, typeof html === "string" ? html : String(html));
-      const tables = extractTables(html, source.tableSelector || "table");
-      const names = dedupe(tables.flatMap(rowsToNames));
+      const fetchPage = async (u, tag) => {
+        const { data: html } = await axios.get(u, { headers: { "User-Agent": USER_AGENT }, timeout: 30000 });
+        saveDiagnostic(`${source.key}${tag}.html`, typeof html === "string" ? html : String(html));
+        return dedupe(extractTables(html, source.tableSelector || "table").flatMap(rowsToNames));
+      };
+      let names = await fetchPage(url, url === source.url ? "" : "_alt");
+      // paginate: IRDAI lists are paged with ?page=N (0-based). Keep going until a page adds no new names.
+      if (source.paginate && names.length) {
+        const seen = new Set(names);
+        for (let page = 1; page <= (source.maxPages || 80); page++) {
+          const next = await fetchPage(`${url}${url.includes("?") ? "&" : "?"}page=${page}`, "_p");
+          const fresh = next.filter((n) => !seen.has(n));
+          if (!fresh.length) break;
+          fresh.forEach((n) => seen.add(n));
+          names = names.concat(fresh);
+        }
+      }
       if (names.length) return { names, titleText: null };
     } catch (e) {
       last = e;
@@ -541,6 +554,11 @@ async function run() {
           scrapeNote = [scrapeNote, `seed names added: ${add.length}`].filter(Boolean).join("; ");
           if (status === "empty") status = "ok";
         }
+      }
+      if (source.englishOnly) {
+        const eng = names.filter((n) => isEnglishName(n));
+        if (eng.length !== names.length) console.log(`  dropped ${names.length - eng.length} non-English name(s)`);
+        names = eng;
       }
       {
         const o = applyNameOverrides(source.key, names);

@@ -77,6 +77,16 @@ export function findHeaderRowIndex(rows) {
 // throws those out instead of polluting the output with garbage.
 export const MAX_PLAUSIBLE_NAME_LENGTH = 180;
 
+/**
+ * True for a name written in English/Latin script: no letters of any other script left (Devanagari is
+ * stripped earlier) and at least 3 Latin letters, so a row that was only Hindi/Marathi text is dropped.
+ */
+export function isEnglishName(name) {
+  const s = String(name || "");
+  if (/[^\u0000-\u024F\u2000-\u206F\u20A0-\u20CF]/.test(s)) return false; // any non-Latin character (letters, CJK, Devanagari ...)
+  return (s.match(/[A-Za-z]/g) || []).length >= 3;
+}
+
 export function rowsToNames(table) {
   const headerIdx = findHeaderRowIndex(table);
   if (headerIdx === -1) return [];

@@ -330,6 +330,90 @@ export const sources = [
     notes: "Confirmed real IRDAI page via search - different URL style than the -insurers1 pattern, but genuinely IRDAI's own page for this list.",
   },
   {
+    key: "irdai_reinsurance_branches",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Foreign Reinsurance Branches",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/reinsurance-branches",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
+    key: "irdai_brokers",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Brokers",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/brokers",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
+    key: "irdai_surveyors",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Surveyors",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/surveyors",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
+    key: "irdai_web_aggregators",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Web-aggregators",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/web-aggregators",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
+    key: "irdai_insurance_repository",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Insurance-repository",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/insurance-repository",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
+    key: "irdai_imf",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Imf",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/imf",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
+    key: "irdai_tpa",
+    categoryAsPerReturn: "Other Financial Entities",
+    categoryAsPerRegulator: "Third-party-administrators",
+    regulator: "IRDAI",
+    url: "https://irdai.gov.in/third-party-administrators-tpa-s-",
+    type: "html_table",
+    tableSelector: "table",
+    paginate: true, // follows ?page=N until no new names
+    englishOnly: true, // drop names that are not in English
+    notes: "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
+  },
+  {
     key: "irdai_ca_insurer",
     categoryAsPerReturn: "Other Financial Entities",
     categoryAsPerRegulator: "CA-Insurer-List",

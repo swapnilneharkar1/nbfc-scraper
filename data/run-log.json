@@ -7,7 +7,7 @@
     "expectedCount": null,
     "category": "NBFC",
     "regulator": "RBI",
-    "ms": 9971,
+    "ms": 8623,
     "error": null,
     "notes": "RBI's file has SR No | NBFC Name | Regional Office | Whether CoR for public deposits | Classification | CIN | Address | Email ID. The Classification column is what BRD issue #3 asks for - captured per-entity, not defaulted to a generic 'NBFC' label. CAPTCHA caveat: see manual-downloads/rbi_nbfc.xlsx fallback in scraper.js.",
     "scrapeNote": "manual name override: 1"
@@ -20,7 +20,7 @@
     "expectedCount": null,
     "category": "NBFC",
     "regulator": "RBI",
-    "ms": 1137,
+    "ms": 1180,
     "error": null,
     "notes": "Matches Annex-3 'Cancelled NBFC & ARC'. Same CAPTCHA caveat as rbi_nbfc.",
     "scrapeNote": null
@@ -33,7 +33,7 @@
     "expectedCount": null,
     "category": "PSS Operating",
     "regulator": "RBI",
-    "ms": 3670,
+    "ms": 4558,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -72,7 +72,7 @@
     "expectedCount": null,
     "category": "PSS Surrender/Cancelled",
     "regulator": "RBI",
-    "ms": 4,
+    "ms": 2,
     "error": null,
     "notes": "Section D (voluntary surrender). Previously lumped with section E under one 'cancelled' key and the heading regex's character-gap cap was too short to match the real heading text at all, so this section silently returned zero rows - fixed and split into its own category.",
     "scrapeNote": null
@@ -98,7 +98,7 @@
     "expectedCount": null,
     "category": "HFCs",
     "regulator": "NHB",
-    "ms": 3134,
+    "ms": 3267,
     "error": "HTTP 403",
     "notes": "Previous version searched the landing page for a link matching /list.*hfc.*\\.pdf$/i and found nothing - the real file is named Registered_Companies.pdf, which doesn't match that pattern at all. Now points directly at the confirmed real URL instead of guessing from a link-text pattern.",
     "scrapeNote": null
@@ -111,7 +111,7 @@
     "expectedCount": null,
     "category": "Private Sector Banks in India",
     "regulator": "RBI",
-    "ms": 3330,
+    "ms": 4303,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -124,7 +124,7 @@
     "expectedCount": null,
     "category": "Public Sector Banks in India",
     "regulator": "RBI",
-    "ms": 37,
+    "ms": 43,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -150,7 +150,7 @@
     "expectedCount": null,
     "category": "Small Finance Banks (SFB)",
     "regulator": "RBI",
-    "ms": 29,
+    "ms": 30,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -163,7 +163,7 @@
     "expectedCount": null,
     "category": "Payments Banks (PB)",
     "regulator": "RBI",
-    "ms": 27,
+    "ms": 26,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -176,7 +176,7 @@
     "expectedCount": null,
     "category": "Regional Rural Banks in India",
     "regulator": "RBI",
-    "ms": 25,
+    "ms": 31,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -189,7 +189,7 @@
     "expectedCount": null,
     "category": "Foreign banks",
     "regulator": "RBI",
-    "ms": 12,
+    "ms": 3,
     "error": null,
     "notes": null,
     "scrapeNote": "5 foreign-bank name(s) do not end in a usual bank/legal word and may carry address text - review: Bank of America National Association | Bank of Ceylon | Bank of Nova Scotia | Industrial and Commercial Bank of China | Industrial Bank of Korea"
@@ -215,7 +215,7 @@
     "expectedCount": null,
     "category": "State Co-operative Banks",
     "regulator": "RBI",
-    "ms": 2,
+    "ms": 1,
     "error": null,
     "notes": "RBI's Banks page lists ALL State Co-operative Banks in one numbered block (34 entries, scheduled and non-scheduled together). The block is read from the page and split using nonScheduledKeywords. The previous source, a 2014 PDF, was out of date.",
     "scrapeNote": "State Co-op block: 34 banks (24 scheduled, 10 non-scheduled)."
@@ -228,7 +228,7 @@
     "expectedCount": null,
     "category": "Scheduled Urban Co-operative Banks",
     "regulator": "RBI",
-    "ms": 801,
+    "ms": 825,
     "error": null,
     "notes": "Found via search - direct RBI PDF of Scheduled Urban Co-operative Banks. Same PDF-extraction caveat as rbi_bank_state_coop.",
     "scrapeNote": null
@@ -241,7 +241,7 @@
     "expectedCount": null,
     "category": "Non-Scheduled Urban Co-operative Banks",
     "regulator": "RBI",
-    "ms": 3745,
+    "ms": 3429,
     "error": null,
     "notes": "Found via search - a plausible match for Non-Scheduled Urban Co-op Banks based on its content (urban bank names/addresses), but the filename itself doesn't explicitly confirm Urban vs State scope - verify against the PDF directly.",
     "scrapeNote": null
@@ -267,7 +267,7 @@
     "expectedCount": null,
     "category": "Life Insurance Companies",
     "regulator": "IRDAI",
-    "ms": 2147,
+    "ms": 2110,
     "error": null,
     "notes": null,
     "scrapeNote": null
@@ -280,7 +280,7 @@
     "expectedCount": null,
     "category": "Non-Life Insurance Companies",
     "regulator": "IRDAI",
-    "ms": 1854,
+    "ms": 2135,
     "error": null,
     "notes": "Found via search, matching the same URL naming pattern as the already-working life-insurers1 (just life -> non-life).",
     "scrapeNote": null
@@ -293,7 +293,7 @@
     "expectedCount": null,
     "category": "Health insurer",
     "regulator": "IRDAI",
-    "ms": 1885,
+    "ms": 2117,
     "error": null,
     "notes": "Standalone health insurers (BRD priority 'Health insurer', rank 5). URL taken from IRDAI's own page title 'List of Health Insurers'; layout not yet confirmed against a live run - check this source in Source Reconciliation.",
     "scrapeNote": "seed names added: 5"
@@ -306,7 +306,7 @@
     "expectedCount": null,
     "category": "Re insurers",
     "regulator": "IRDAI",
-    "ms": 2141,
+    "ms": 2070,
     "error": null,
     "notes": "Confirmed real IRDAI page via search - different URL style than the -insurers1 pattern, but genuinely IRDAI's own page for this list.",
     "scrapeNote": null
@@ -319,7 +319,7 @@
     "expectedCount": null,
     "category": "Foreign Reinsurance Branches",
     "regulator": "IRDAI",
-    "ms": 3832,
+    "ms": 3822,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -332,7 +332,7 @@
     "expectedCount": null,
     "category": "Brokers",
     "regulator": "IRDAI",
-    "ms": 3261,
+    "ms": 3497,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -345,7 +345,7 @@
     "expectedCount": null,
     "category": "Surveyors",
     "regulator": "IRDAI",
-    "ms": 2556,
+    "ms": 2474,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -358,7 +358,7 @@
     "expectedCount": null,
     "category": "Web-aggregators",
     "regulator": "IRDAI",
-    "ms": 2433,
+    "ms": 2364,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -371,7 +371,7 @@
     "expectedCount": null,
     "category": "Insurance-repository",
     "regulator": "IRDAI",
-    "ms": 2021,
+    "ms": 2228,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -384,7 +384,7 @@
     "expectedCount": null,
     "category": "Imf",
     "regulator": "IRDAI",
-    "ms": 2781,
+    "ms": 3264,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -397,7 +397,7 @@
     "expectedCount": null,
     "category": "Third-party-administrators",
     "regulator": "IRDAI",
-    "ms": 4389,
+    "ms": 4298,
     "error": null,
     "notes": "Added 13 Nov 2026 at the user's request; page layout not yet confirmed against a live run.",
     "scrapeNote": null
@@ -410,7 +410,7 @@
     "expectedCount": null,
     "category": "CA-Insurer-List",
     "regulator": "IRDAI",
-    "ms": 2408,
+    "ms": 2372,
     "error": null,
     "notes": "CA = Corporate Agents (confirmed). Same -1 suffix pattern as life-insurers1/non-life-insurers1.",
     "scrapeNote": null
@@ -423,7 +423,7 @@
     "expectedCount": 9,
     "category": "Credit Rating Agency",
     "regulator": "SEBI",
-    "ms": 1864,
+    "ms": 1906,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Credit Rating Agency - CRA [ Nov 14, 2026 ]; intmId used: 7; expected: 9; got: 9; via: download; download file rows: 9, distinct names: 9, blank: 0"
@@ -436,7 +436,7 @@
     "expectedCount": 149,
     "category": "Venture Capital Funds",
     "regulator": "SEBI",
-    "ms": 1878,
+    "ms": 1379,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Venture Capital Funds [ Nov 14, 2026 ]; intmId used: 21; expected: 149; got: 146; via: download; download file rows: 149, distinct names: 146, blank: 0"
@@ -449,7 +449,7 @@
     "expectedCount": 311,
     "category": "Registered Foreign Venture Capital Investors",
     "regulator": "SEBI",
-    "ms": 1888,
+    "ms": 1881,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Foreign Venture Capital Investors [ Nov 14, 2026 ]; intmId used: 25; expected: 311; got: 302; via: download; download file rows: 311, distinct names: 302, blank: 0"
@@ -462,7 +462,7 @@
     "expectedCount": 1082,
     "category": "Investment Adviser",
     "regulator": "SEBI",
-    "ms": 3469,
+    "ms": 3431,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Investment Adviser [ Nov 14, 2026 ]; intmId used: 13; expected: 1082; got: 1071; via: download; download file rows: 1082, distinct names: 1071, blank: 0"
@@ -475,7 +475,7 @@
     "expectedCount": 5015,
     "category": "Stock Brokers in equity segment",
     "regulator": "SEBI",
-    "ms": 8279,
+    "ms": 8276,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Stock Brokers in equity segment [ Nov 14, 2026 ]; intmId used: 30; expected: 5015; got: 2663; via: download; download file rows: 5015, distinct names: 2663, blank: 0"
@@ -488,7 +488,7 @@
     "expectedCount": 3809,
     "category": "Stock Brokers in Equity Derivative Segment",
     "regulator": "SEBI",
-    "ms": 6636,
+    "ms": 6654,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Stock Brokers in Equity Derivative Segment [ Nov 14, 2026 ]; intmId used: 31; expected: 3809; got: 1730; via: download; download file rows: 3809, distinct names: 1730, blank: 0"
@@ -501,7 +501,7 @@
     "expectedCount": 2118,
     "category": "Stock Brokers in Commodity Derivative",
     "regulator": "SEBI",
-    "ms": 3992,
+    "ms": 4525,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Stock Brokers in Commodity Derivative Segment [ Nov 14, 2026 ]; intmId used: 2; expected: 2118; got: 856; via: download; download file rows: 2118, distinct names: 856, blank: 0"
@@ -514,7 +514,7 @@
     "expectedCount": 765,
     "category": "Stock Brokers in Debt Segement",
     "regulator": "SEBI",
-    "ms": 2409,
+    "ms": 2403,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Stock Brokers in Debt Segment [ Nov 14, 2026 ]; intmId used: 37; expected: 765; got: 456; via: download; download file rows: 765, distinct names: 456, blank: 0"
@@ -527,7 +527,7 @@
     "expectedCount": 1484,
     "category": "Stock Brokers in Interest Rate Derivative",
     "regulator": "SEBI",
-    "ms": 3446,
+    "ms": 3515,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Stock Brokers in Interest Rate Derivative Segment [ Nov 14, 2026 ]; intmId used: 38; expected: 1484; got: 869; via: download; download file rows: 1484, distinct names: 869, blank: 0"
@@ -540,7 +540,7 @@
     "expectedCount": 2690,
     "category": "Stock Brokers in Currency Derivative Segment",
     "regulator": "SEBI",
-    "ms": 5057,
+    "ms": 5038,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Stock Brokers in Currency Derivative Segment [ Nov 14, 2026 ]; intmId used: 32; expected: 2690; got: 1457; via: download; download file rows: 2690, distinct names: 1457, blank: 0"
@@ -553,7 +553,7 @@
     "expectedCount": 543,
     "category": "Registered Portfolio Managers",
     "regulator": "SEBI",
-    "ms": 2380,
+    "ms": 2392,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Portfolio Managers [ Nov 14, 2026 ]; intmId used: 33; expected: 543; got: 540; via: download; download file rows: 543, distinct names: 540, blank: 0"
@@ -566,7 +566,7 @@
     "expectedCount": 62,
     "category": "Mutual Funds",
     "regulator": "SEBI",
-    "ms": 1351,
+    "ms": 1362,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Mutual Funds [ Nov 14, 2026 ]; intmId used: 23; expected: 62; got: 62; via: download; download file rows: 62, distinct names: 62, blank: 0"
@@ -579,7 +579,7 @@
     "expectedCount": 756,
     "category": "Depository Participants - CDSL",
     "regulator": "SEBI",
-    "ms": 2902,
+    "ms": 2895,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Depository Participants - CDSL [ Nov 14, 2026 ]; intmId used: 18; expected: 756; got: 648; via: download; download file rows: 756, distinct names: 648, blank: 0"
@@ -592,7 +592,7 @@
     "expectedCount": 357,
     "category": "Depository Participants - NSDL",
     "regulator": "SEBI",
-    "ms": 1883,
+    "ms": 1874,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Depository Participants - NSDL [ Nov 14, 2026 ]; intmId used: 19; expected: 357; got: 321; via: download; download file rows: 357, distinct names: 321, blank: 0"
@@ -605,7 +605,7 @@
     "expectedCount": 253,
     "category": "Merchant Banker",
     "regulator": "SEBI",
-    "ms": 1869,
+    "ms": 1877,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Merchant Bankers [ Nov 14, 2026 ]; intmId used: 9; expected: 253; got: 253; via: download; download file rows: 253, distinct names: 253, blank: 0"
@@ -618,7 +618,7 @@
     "expectedCount": 26,
     "category": "Debentures Trustee",
     "regulator": "SEBI",
-    "ms": 1354,
+    "ms": 1353,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Debentures Trustee [ Nov 14, 2026 ]; intmId used: 6; expected: 26; got: 25; via: download; download file rows: 26, distinct names: 25, blank: 0"
@@ -631,7 +631,7 @@
     "expectedCount": 18,
     "category": "Registered Custodians",
     "regulator": "SEBI",
-    "ms": 1367,
+    "ms": 1853,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registered Custodians [ Nov 14, 2026 ]; intmId used: 27; expected: 18; got: 18; via: download; download file rows: 18, distinct names: 18, blank: 0"
@@ -644,7 +644,7 @@
     "expectedCount": 80,
     "category": "Share Transfer Agent",
     "regulator": "SEBI",
-    "ms": 1853,
+    "ms": 1353,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Registrars to an issue and share Transfer Agents [ Nov 14, 2026 ]; intmId used: 10; expected: 80; got: 80; via: download; download file rows: 80, distinct names: 80, blank: 0"
@@ -657,7 +657,7 @@
     "expectedCount": 64,
     "category": "Banker to an Issue",
     "regulator": "SEBI",
-    "ms": 1350,
+    "ms": 1346,
     "error": null,
     "notes": null,
     "scrapeNote": "hub label: Banker to an Issue [ Nov 14, 2026 ]; intmId used: 5; expected: 64; got: 64; via: download; download file rows: 64, distinct names: 64, blank: 0"
@@ -670,7 +670,7 @@
     "expectedCount": null,
     "category": "Pension Fund",
     "regulator": "PFRDA",
-    "ms": 6376,
+    "ms": 4814,
     "error": null,
     "notes": "Previous version read EVERY table on the page and so picked up the wrong one. The page's raw text/HTML is saved to output/diagnostics/ on every run so the selection can be checked.",
     "scrapeNote": null
@@ -679,14 +679,14 @@
     "key": "amfi_amc",
     "url": "https://www.amfiindia.com/aboutamfi?tab=members",
     "status": "ok",
-    "count": 23,
+    "count": 58,
     "expectedCount": null,
     "category": "Mutual Funds",
     "regulator": "AMFI",
-    "ms": 83186,
+    "ms": 331530,
     "error": null,
     "notes": "Added 19 Nov 2026. Same categories as the SEBI Mutual Funds list; an AMC present in both is one entity.",
-    "scrapeNote": "23 AMC name(s) from 23 member page(s)"
+    "scrapeNote": "58 AMC name(s) from 59 member page(s); 1 page(s) gave no AMC name: Association of Mutual Funds in India (Waiting failed: 20000ms exceeded)"
   },
   {
     "key": "amfi_distributor",

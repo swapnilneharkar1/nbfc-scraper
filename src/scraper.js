@@ -140,6 +140,38 @@ async function readAmcName(page) {
   return m ? m[1].trim() : null;
 }
 
+const CARD_TITLE_JS = () => {
+  const out = [];
+  for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,a")) {
+    if (el.children.length) continue;
+    const t = (el.innerText || "").trim();
+    if (/(mutual\s+fund|\bmf|\bfunds?)\s*$/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
+  }
+  return out.length;
+};
+
+/** The members page shows a first batch of cards and a "See more" button: click it until no new cards appear. */
+async function expandAllCards(page) {
+  let stalls = 0;
+  let last = await page.evaluate(CARD_TITLE_JS);
+  for (let i = 0; i < 80 && stalls < 3; i++) {
+    const clicked = await page.evaluate(() => {
+      const el = [...document.querySelectorAll("button,a,span,div,p")].find(
+        (e) => !e.children.length && /^\s*(see|view|load|show)\s+more\s*[+>»]?\s*$/i.test(e.innerText || "") && e.offsetParent !== null
+      );
+      if (!el) return false;
+      el.scrollIntoView({ block: "center" });
+      el.click();
+      return true;
+    });
+    await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
+    await new Promise((r) => setTimeout(r, clicked ? 900 : 400));
+    const now = await page.evaluate(CARD_TITLE_JS);
+    if (now > last) { last = now; stalls = 0; } else stalls += 1;
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
+
 async function scrapeAmfiMembers(source, browser) {
   const page = await browser.newPage();
   await page.setUserAgent(USER_AGENT);
@@ -149,12 +181,7 @@ async function scrapeAmfiMembers(source, browser) {
     const openList = async () => {
       await page.goto(source.url, { waitUntil: "networkidle2", timeout: 60000 });
       await page.waitForFunction(() => document.body && document.body.innerText.length > 300, { timeout: 20000 }).catch(() => null);
-      // cards may load lazily while scrolling
-      for (let i = 0; i < 12; i++) {
-        await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
-        await new Promise((r) => setTimeout(r, 400));
-      }
-      await page.evaluate(() => window.scrollTo(0, 0));
+      await expandAllCards(page);
     };
     await openList();
     saveDiagnostic(`${source.key}.html`, await page.content());
@@ -167,7 +194,7 @@ async function scrapeAmfiMembers(source, browser) {
       for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,a")) {
         if (el.children.length) continue;
         const t = (el.innerText || "").trim();
-        if (/\b(mutual\s+fund|mf)\s*$/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
+        if (/(mutual\s+fund|\bmf|\bfunds?)\s*$/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
       }
       return out;
     });

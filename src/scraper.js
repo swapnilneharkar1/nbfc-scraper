@@ -126,6 +126,95 @@ async function scrapeHtmlTable(source) {
  * DOM. If the page instead just links out to a PDF/XLS (common on RBI
  * pages), we fall back to treating it like a pdf_link source.
  */
+
+// ---------------------------------------------------------------------------
+// AMFI members: https://www.amfiindia.com/aboutamfi?tab=members lists one card per mutual fund. Each card opens a
+// detail page (/member/<id>) with "Name of Assest Management Co." (sic). We open every card and read that value.
+// ---------------------------------------------------------------------------
+const AMFI_AMC_LABEL = /Name\s+of\s+Ass?e?s?t?\s*Management\s+Co(?:mpany)?\.?\s*[:\-]?\s*([^\n\t]+)/i;
+
+async function readAmcName(page) {
+  await page.waitForFunction(() => /Management\s+Co/i.test(document.body ? document.body.innerText : ""), { timeout: 20000 });
+  const text = await page.evaluate(() => document.body.innerText);
+  const m = AMFI_AMC_LABEL.exec(text);
+  return m ? m[1].trim() : null;
+}
+
+async function scrapeAmfiMembers(source, browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  const names = [];
+  const problems = [];
+  try {
+    const openList = async () => {
+      await page.goto(source.url, { waitUntil: "networkidle2", timeout: 60000 });
+      await page.waitForFunction(() => document.body && document.body.innerText.length > 300, { timeout: 20000 }).catch(() => null);
+      // cards may load lazily while scrolling
+      for (let i = 0; i < 12; i++) {
+        await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
+    };
+    await openList();
+    saveDiagnostic(`${source.key}.html`, await page.content());
+
+    const links = await page.evaluate(() =>
+      [...new Set([...document.querySelectorAll("a[href]")].map((a) => a.href).filter((h) => /\/member\/\d+/.test(h)))]
+    );
+    const titles = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,a")) {
+        if (el.children.length) continue;
+        const t = (el.innerText || "").trim();
+        if (/\b(mutual\s+fund|mf)\s*$/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
+      }
+      return out;
+    });
+    console.log(`  AMFI members page: ${links.length} member link(s), ${titles.length} card title(s)`);
+
+    if (links.length) {
+      for (const href of links) {
+        try {
+          await page.goto(href, { waitUntil: "networkidle2", timeout: 45000 });
+          const n = await readAmcName(page);
+          if (n) names.push(n); else problems.push(href);
+        } catch (e) {
+          problems.push(`${href} (${e.message})`);
+        }
+      }
+    } else {
+      // Cards without real links: click each card, read the detail, return to the list.
+      for (const title of titles) {
+        try {
+          await openList();
+          const clicked = await page.evaluate((t) => {
+            const el = [...document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,a")].find((e) => !e.children.length && (e.innerText || "").trim() === t);
+            if (!el) return false;
+            el.scrollIntoView();
+            el.click();
+            return true;
+          }, title);
+          if (!clicked) { problems.push(title); continue; }
+          const n = await readAmcName(page);
+          if (n) names.push(n); else problems.push(title);
+        } catch (e) {
+          problems.push(`${title} (${e.message})`);
+        }
+      }
+    }
+  } finally {
+    await page.close();
+  }
+  const uniq = [...new Set(names)];
+  let note = `${uniq.length} AMC name(s) from ${uniq.length + problems.length} member page(s)`;
+  if (problems.length) {
+    note += `; ${problems.length} page(s) gave no AMC name: ${problems.slice(0, 8).join(" | ")}`;
+    console.log(`  WARNING: ${problems.length} AMFI member page(s) gave no AMC name`);
+  }
+  return { names: uniq, note };
+}
+
 async function scrapeAspxDynamic(source, browser) {
   const page = await browser.newPage();
   await page.setUserAgent(USER_AGENT);
@@ -556,6 +645,8 @@ async function run() {
       try {
         if (source.type === "html_table") {
           ({ names, titleText } = await scrapeHtmlTable(source));
+        } else if (source.type === "amfi_members") {
+          ({ names, note: scrapeNote } = await scrapeAmfiMembers(source, browser));
         } else if (source.type === "aspx_dynamic") {
           ({ names, titleText } = await scrapeAspxDynamic(source, browser));
         } else if (source.type === "xlsx_direct") {

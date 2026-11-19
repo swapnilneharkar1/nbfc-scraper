@@ -621,6 +621,16 @@ export const sources = [
   },
 
   {
+    key: "amfi_amc",
+    categoryAsPerReturn: "Mutual Fund Companies",
+    categoryAsPerRegulator: "Mutual Funds",
+    regulator: "AMFI",
+    url: "https://www.amfiindia.com/aboutamfi?tab=members",
+    type: "amfi_members", // opens every member card and reads "Name of Assest Management Co."
+    englishOnly: true,
+    notes: "Added 19 Nov 2026. Same categories as the SEBI Mutual Funds list; an AMC present in both is one entity.",
+  },
+  {
     key: "amfi_distributor",
     categoryAsPerReturn: "Other Financial Entities",
     categoryAsPerRegulator: "Mutual Fund Distributor",

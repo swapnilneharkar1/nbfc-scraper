@@ -145,31 +145,54 @@ const CARD_TITLE_JS = () => {
   for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,a")) {
     if (el.children.length) continue;
     const t = (el.innerText || "").trim();
-    if (/(mutual\s+fund|\bmf|\bfunds?)\s*$/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
+    if (/mutual\s+fund/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
   }
   return out.length;
 };
 
+// Finds the "See more" control: the DEEPEST visible element whose whole text is "see/view/load/show more" (it may
+// contain an icon or inner <span>), and returns its centre so it can be clicked with a real mouse click.
+const FIND_MORE_JS = () => {
+  const re = /^\s*(see|view|load|show)\s*(more|all)\b[\s+>»↓⌄]*$/i;
+  // not the floating "View All" bar that sits fixed at the bottom of the screen
+  const fixed = (e) => { for (let n = e; n && n.nodeType === 1; n = n.parentElement) { const p = getComputedStyle(n).position; if (p === "fixed" || p === "sticky") return true; } return false; };
+  const all = [...document.querySelectorAll("button,a,span,div,p,li,[role=button]")].filter(
+    (e) => e.offsetParent !== null && (e.innerText || "").length < 30 && re.test(e.innerText || "") && !fixed(e)
+  );
+  const deepest = all.filter((e) => !all.some((o) => o !== e && e.contains(o)));
+  const el = deepest[deepest.length - 1];
+  if (!el) {
+    const seen = [...document.querySelectorAll("button,a,[role=button]")].map((e) => (e.innerText || "").trim()).filter((t) => t && t.length < 25);
+    return { found: false, seen: [...new Set(seen)].slice(0, 25) };
+  }
+  el.scrollIntoView({ block: "center" });
+  const r = el.getBoundingClientRect();
+  return { found: true, x: r.left + r.width / 2, y: r.top + r.height / 2, text: (el.innerText || "").trim() };
+};
+
 /** The members page shows a first batch of cards and a "See more" button: click it until no new cards appear. */
-async function expandAllCards(page) {
+async function expandAllCards(page, log = console.log) {
   let stalls = 0;
   let last = await page.evaluate(CARD_TITLE_JS);
+  let sawButton = false;
+  let seen = [];
   for (let i = 0; i < 80 && stalls < 3; i++) {
-    const clicked = await page.evaluate(() => {
-      const el = [...document.querySelectorAll("button,a,span,div,p")].find(
-        (e) => !e.children.length && /^\s*(see|view|load|show)\s+more\s*[+>»]?\s*$/i.test(e.innerText || "") && e.offsetParent !== null
-      );
-      if (!el) return false;
-      el.scrollIntoView({ block: "center" });
-      el.click();
-      return true;
-    });
-    await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
-    await new Promise((r) => setTimeout(r, clicked ? 900 : 400));
+    const f = await page.evaluate(FIND_MORE_JS);
+    if (f.found) {
+      sawButton = true;
+      await page.mouse.click(f.x, f.y);
+    } else {
+      seen = f.seen;
+      await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
+    }
+    await new Promise((r) => setTimeout(r, f.found ? 1200 : 500));
     const now = await page.evaluate(CARD_TITLE_JS);
     if (now > last) { last = now; stalls = 0; } else stalls += 1;
   }
+  if (!sawButton) log(`  WARNING: no "See more" control found on the AMFI page. Buttons/links seen: ${seen.join(" | ") || "(none)"}`);
+  log(`  AMFI members page: ${last} card(s) after expanding`);
   await page.evaluate(() => window.scrollTo(0, 0));
+  return { cards: last, sawButton, seen };
 }
 
 async function scrapeAmfiMembers(source, browser) {
@@ -177,11 +200,12 @@ async function scrapeAmfiMembers(source, browser) {
   await page.setUserAgent(USER_AGENT);
   const names = [];
   const problems = [];
+  let lastExpand = null;
   try {
     const openList = async () => {
       await page.goto(source.url, { waitUntil: "networkidle2", timeout: 60000 });
       await page.waitForFunction(() => document.body && document.body.innerText.length > 300, { timeout: 20000 }).catch(() => null);
-      await expandAllCards(page);
+      lastExpand = await expandAllCards(page);
     };
     await openList();
     saveDiagnostic(`${source.key}.html`, await page.content());
@@ -194,7 +218,7 @@ async function scrapeAmfiMembers(source, browser) {
       for (const el of document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,a")) {
         if (el.children.length) continue;
         const t = (el.innerText || "").trim();
-        if (/(mutual\s+fund|\bmf|\bfunds?)\s*$/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
+        if (/mutual\s+fund/i.test(t) && t.length < 80 && !out.includes(t)) out.push(t);
       }
       return out;
     });
@@ -235,6 +259,7 @@ async function scrapeAmfiMembers(source, browser) {
   }
   const uniq = [...new Set(names)];
   let note = `${uniq.length} AMC name(s) from ${uniq.length + problems.length} member page(s)`;
+  if (lastExpand && !lastExpand.sawButton) note += `; no "See more" control found (buttons seen: ${lastExpand.seen.join(" | ")})`;
   if (problems.length) {
     note += `; ${problems.length} page(s) gave no AMC name: ${problems.slice(0, 8).join(" | ")}`;
     console.log(`  WARNING: ${problems.length} AMFI member page(s) gave no AMC name`);

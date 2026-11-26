@@ -27,3 +27,20 @@ export function reportingCategory(source, name, classification) {
   }
   return base;
 }
+
+/**
+ * An RBI NBFC whose registration is cancelled (RBI's cancelled-CoR list, or a press-release cancellation / surrender
+ * applied to the master list) is reported as "Cancelled NBFC" - not as an active NBFC category. It is ranked below the
+ * active intermediary categories (brokers, depository participants ...), so such an entity is reported under its active
+ * "Other Financial Entities" membership, and above CA-Insurer-List and cancelled PSS rows. ARCs stay under
+ * "Other Financial Entities". Mutates and returns the hit.
+ */
+export const CANCELLED_NBFC = "Cancelled NBFC";
+export function applyCancelledNbfc(hit) {
+  if (hit.sourceKey !== "rbi_nbfc" && hit.sourceKey !== "rbi_nbfc_cancelled") return hit;
+  if (!/cancel|surrender/i.test(String(hit.status || ""))) return hit;
+  if (hit.categoryAsPerRegulator === "ARC") return hit;
+  hit.categoryAsPerReturn = CANCELLED_NBFC;
+  hit.rankCategory = CANCELLED_NBFC; // ranking only; Category (as per Regulator) keeps RBI's own classification
+  return hit;
+}

@@ -519,7 +519,7 @@ export const sources = [
   },
   {
     key: "sebi_mutual_funds",
-    categoryAsPerReturn: "Mutual Fund Companies",
+    categoryAsPerReturn: "Other Financial Entities", // was "Mutual Fund Companies" (26 Nov 2026)
     categoryAsPerRegulator: "Mutual Funds",
     regulator: "SEBI",
     url: "https://www.sebi.gov.in/sebiweb/other/OtherAction.do?doRecognisedFpi=yes&intmId=23",
@@ -622,7 +622,7 @@ export const sources = [
 
   {
     key: "amfi_amc",
-    categoryAsPerReturn: "Mutual Fund Companies",
+    categoryAsPerReturn: "Other Financial Entities", // was "Mutual Fund Companies" (26 Nov 2026)
     categoryAsPerRegulator: "Mutual Funds",
     regulator: "AMFI",
     url: "https://www.amfiindia.com/aboutamfi?tab=members",

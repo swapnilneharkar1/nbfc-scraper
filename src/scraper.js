@@ -30,7 +30,7 @@ import { parseRbiBanksSection, parseRbiPssSection, parseRbiStateCoop, parseSebiI
 import { resolveSebiIntmId } from "./sebiUtils.js";
 import { makeEntityKeyer, entityNames } from "./entityKey.js";
 import { applyNameOverrides } from "./manualOverrides.js";
-import { reportingCategory } from "./reportingRules.js";
+import { reportingCategory, applyCancelledNbfc } from "./reportingRules.js";
 import { resolveWithPriorityMatrix } from "./resolve.js";
 import { namesFromListLines, guessNameColumnIndex, findHeaderRowIndex, rowsToNames, isEnglishName, namesFromTables, MAX_PLAUSIBLE_NAME_LENGTH } from "./nameUtils.js";
 
@@ -887,6 +887,8 @@ async function run() {
     }
     console.log(`Applied press-release final status to ${applied} Combine List row(s).`);
   }
+
+  rawHits.forEach(applyCancelledNbfc);
 
   const { resolved, multiCategoryEntities } = resolveWithPriorityMatrix(rawHits, keyer);
 

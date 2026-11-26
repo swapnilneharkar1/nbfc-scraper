@@ -21,7 +21,7 @@ export function resolveWithPriorityMatrix(rawHits, keyer) {
 
   for (const { name, memberships } of byName.values()) {
     const ranked = memberships
-      .map((m) => ({ ...m, rank: getRank(m.categoryAsPerRegulator) }))
+      .map((m) => ({ ...m, rank: getRank(m.rankCategory || m.categoryAsPerRegulator) }))
       .sort((a, b) => a.rank - b.rank);
     const winner = ranked[0];
 

@@ -36,7 +36,7 @@ export const PRIORITY_MATRIX = [
   { rank: 9, category: "Financial Institutions in India" },
   { rank: 10, category: "ARC" },
   { rank: 10, category: "Banker to an Issue" },
-  { rank: 10, category: "CA-Insurer-List" },
+  { rank: 11, category: "CA-Insurer-List" }, // BRD: 10. Moved below "Cancelled NBFC" on 26 Nov 2026 (Equator Corporate Finance example).
   { rank: 10, category: "Credit Rating Agency" },
   { rank: 10, category: "Debentures Trustee" },
   { rank: 10, category: "Depository Participants - CDSL" },
@@ -57,6 +57,8 @@ export const PRIORITY_MATRIX = [
   { rank: 10, category: "Stock Brokers in equity segment" },
   { rank: 10, category: "Stock Brokers in Interest Rate Derivative" },
   { rank: 10, category: "Venture Capital Funds" },
+  // Added 26 Nov 2026: below every active rank-10 intermediary, above CA-Insurer-List.
+  { rank: 10.5, category: "Cancelled NBFC" },
   // Added 13 Nov 2026 (IRDAI intermediary lists, reported under Other Financial Entities) - not in the BRD sheet.
   { rank: 10, category: "Foreign Reinsurance Branches" },
   { rank: 10, category: "Brokers" },

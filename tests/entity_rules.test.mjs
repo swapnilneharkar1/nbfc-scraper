@@ -72,3 +72,43 @@ console.log("entity_rules: all assertions passed");
   const k = makeEntityKeyer(o.names.concat(["STANDARD CHARTERED CAPITAL LIMITED"]));
   assert.equal(k(o.names[0]), k("STANDARD CHARTERED CAPITAL LIMITED"));
 }
+
+{
+  const { isEnglishName } = await import("../src/nameUtils.js");
+  const { getRank } = await import("../src/priorityMatrix.js");
+  assert.equal(isEnglishName("Aon India Insurance Brokers Private Limited"), true);
+  assert.equal(isEnglishName("एओन इंडिया इंश्योरेंस"), false);
+  assert.equal(isEnglishName("தமிழ் Insurance Surveyors"), false);
+  assert.equal(isEnglishName("A&B (India) Ltd."), true);
+  assert.equal(isEnglishName("12"), false);
+  for (const c of ["Foreign Reinsurance Branches", "Brokers", "Surveyors", "Web-aggregators", "Insurance-repository", "Imf", "Third-party-administrators"]) assert.equal(getRank(c), 10, c);
+  assert.equal(getRank("Mutual Funds"), 5);
+}
+
+{
+  const { applyCancelledNbfc } = await import("../src/reportingRules.js");
+  const { resolveWithPriorityMatrix } = await import("../src/resolve.js");
+  const keyer = makeEntityKeyer(["Equator Corporate Finance Private Limited", "Motilal Oswal Financial Services Limited", "Supreme Securities Limited", "Phoenix ARC Private Limited", "Neo Investment Value Advisors Private Limited"]);
+  const hit = (name, sourceKey, reg, ret, status = "Active") => ({ name, sourceKey, categoryAsPerRegulator: reg, categoryAsPerReturn: ret, regulator: "X", status });
+  const hits = [
+    hit("Equator Corporate Finance Private Limited", "rbi_nbfc_cancelled", "NBFC", "Other NBFCs", "Cancelled"),
+    hit("Equator Corporate Finance Private Limited", "irdai_ca_insurer", "CA-Insurer-List", "Other Financial Entities"),
+    hit("Motilal Oswal Financial Services Limited", "rbi_nbfc", "ICC", "Other NBFCs", "Cancelled"), // cancelled through a press release
+    hit("Motilal Oswal Financial Services Limited", "sebi_broker_equity", "Stock Brokers in equity segment", "Other Financial Entities"),
+    hit("Motilal Oswal Financial Services Limited", "irdai_ca_insurer", "CA-Insurer-List", "Other Financial Entities"),
+    hit("Supreme Securities Limited", "rbi_nbfc_cancelled", "NBFC", "Other NBFCs", "Cancelled"),
+    hit("Supreme Securities Limited", "rbi_pss_surrendered", "PSS Surrender/Cancelled", "Other Financial Entities", "Surrendered"),
+    hit("Phoenix ARC Private Limited", "rbi_nbfc_cancelled", "ARC", "Other Financial Entities", "Cancelled"),
+    hit("Neo Investment Value Advisors Private Limited", "sebi_mutual_funds", "Mutual Funds", "Other Financial Entities"),
+  ];
+  hits.forEach(applyCancelledNbfc);
+  const { resolved } = resolveWithPriorityMatrix(hits, keyer);
+  const by = Object.fromEntries(resolved.map((r) => [r.name, r]));
+  assert.equal(by["Equator Corporate Finance Private Limited"].categoryAsPerReturn, "Cancelled NBFC");
+  assert.equal(by["Motilal Oswal Financial Services Limited"].categoryAsPerReturn, "Other Financial Entities");
+  assert.equal(by["Motilal Oswal Financial Services Limited"].sourceKey, "sebi_broker_equity");
+  assert.equal(by["Supreme Securities Limited"].categoryAsPerReturn, "Cancelled NBFC");
+  assert.equal(by["Phoenix ARC Private Limited"].categoryAsPerReturn, "Other Financial Entities");
+  assert.equal(by["Neo Investment Value Advisors Private Limited"].categoryAsPerReturn, "Other Financial Entities");
+  assert.equal(by["Equator Corporate Finance Private Limited"].category, "NBFC"); // Regulator category keeps RBI's own label
+}
